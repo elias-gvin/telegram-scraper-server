@@ -8,6 +8,12 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "Telethon==1.40.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.14.10",
 ]
 
 [tool.poetry]
