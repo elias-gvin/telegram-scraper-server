@@ -1,0 +1,18 @@
+[project]
+name = "telegram-scraper-cli"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Oleksandr Detilie",email = "oleksandr@neocybernetica.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+]
+
+[tool.poetry]
+packages = [{include = "telegram_scraper_cli", from = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
