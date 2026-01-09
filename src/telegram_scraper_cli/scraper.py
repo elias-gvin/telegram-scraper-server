@@ -265,9 +265,41 @@ class OptimizedTelegramScraper:
                     (media_path, message_id))
         conn.commit()
 
-    def set_client(self, client: TelegramClient):
-        """Set the TelegramClient instance."""
-        self.client = client
+    async def initialize_client(self):
+        if not all([self.api_id, self.api_hash]):
+            error_message = "API Configuration Required"
+            logger.error(error_message)
+            raise ValueError(error_message)
+
+        self.client = TelegramClient('session', self.api_id, self.api_hash)
+        
+        try:
+            await self.client.connect()
+        except Exception as e:
+            logger.error(f"Failed to connect: {e}")
+            return False
+        
+        if not await self.client.is_user_authorized():
+            print("\n=== Choose Authentication Method ===")
+            print("[1] QR Code (Recommended - No phone number needed)")
+            print("[2] Phone Number (Traditional method)")
+            
+            while True:
+                choice = input("Enter your choice (1 or 2): ").strip()
+                if choice in ['1', '2']:
+                    break
+                print("Please enter 1 or 2")
+            
+            success = await self.qr_code_auth() if choice == '1' else await self.phone_auth()
+                
+            if not success:
+                print("Authentication failed. Please try again.")
+                await self.client.disconnect()
+                return False
+        else:
+            print("✅ Already authenticated!")
+            
+        return True
 
     def close_db_connections(self):
         conn = self.db_connection
