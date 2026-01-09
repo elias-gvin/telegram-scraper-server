@@ -5,12 +5,9 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
-from io import StringIO
 from telethon import TelegramClient
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, MessageMediaWebPage, User, PeerChannel, Channel, Chat, Message
 from telethon.errors import FloodWaitError, SessionPasswordNeededError
-import qrcode
-from datetime import datetime
 from tqdm.asyncio import tqdm as atqdm
 from tqdm import tqdm
 
@@ -64,8 +61,6 @@ class OptimizedTelegramScraper:
         self.media_download_batch_size = MEDIA_DOWNLOAD_BATCH_SIZE
 
     async def download_media(self, message: Message) -> Optional[str]:
-        channel = self.scrape_params.channel[0]
-
         if not message.media or not self.scrape_params.scrape_media:
             return None
 
@@ -73,9 +68,11 @@ class OptimizedTelegramScraper:
             return None
 
         try:
-            channel_dir = Path(channel)
+            channel = self.scrape_params.channel[0]
+            output_dir = Path(self.scrape_params.output_dir)
+            channel_dir = output_dir / channel
             media_folder = channel_dir / 'media'
-            media_folder.mkdir(exist_ok=True)
+            media_folder.mkdir(parents=True, exist_ok=True)
             
             if isinstance(message.media, MessageMediaPhoto):
                 original_name = getattr(message.file, 'name', None) or "photo.jpg"
@@ -117,7 +114,10 @@ class OptimizedTelegramScraper:
         except Exception:
             return None
 
-    async def scrape_channel(self) -> List[MessageData]:
+    async def scrape_channel(self) -> None:
+        if not self.client:
+            raise ValueError("TelegramClient not initialized. Call set_client() first.")
+        
         try:
             channel = self.scrape_params.channel[0]
             entity = await self.client.get_entity(PeerChannel(int(channel)) if channel.startswith('-') else channel)
@@ -132,7 +132,6 @@ class OptimizedTelegramScraper:
 
             message_batch = []
             media_tasks = []
-            semaphore = asyncio.Semaphore(self.max_concurrent_downloads)
 
             # Wrap async iterator with tqdm for progress tracking
             messages_iter = self.client.iter_messages(entity, offset_date=self.scrape_params.start_date, reverse=True)
@@ -174,14 +173,14 @@ class OptimizedTelegramScraper:
                         media_tasks.append(message)
 
                     if len(message_batch) >= self.batch_size:
-                        self.batch_insert_messages(channel, message_batch)
+                        self.batch_insert_messages(message_batch)
                         message_batch.clear()
 
                 except Exception as e:
                     logger.error(f"Error processing message {message.id}: {e}", exc_info=True)
 
             if message_batch:
-                self.batch_insert_messages(channel, message_batch)
+                self.batch_insert_messages(message_batch)
 
             if media_tasks:
                 total_media = len(media_tasks)
@@ -192,7 +191,7 @@ class OptimizedTelegramScraper:
                 
                 async def download_single_media(message):
                     async with semaphore:
-                        return await self.download_media(channel, message)
+                        return await self.download_media(message)
                 
                 with tqdm(total=total_media, desc="📥 Media", unit="file") as pbar:
                     for i in range(0, len(media_tasks), self.media_download_batch_size):
@@ -203,7 +202,7 @@ class OptimizedTelegramScraper:
                             try:
                                 media_path = await task
                                 if media_path:
-                                    await self.update_media_path(channel, batch[j].id, media_path)
+                                    await self.update_media_path(batch[j].id, media_path)
                                     successful_downloads += 1
                             except Exception:
                                 pass
@@ -259,12 +258,19 @@ class OptimizedTelegramScraper:
 
         return self.db_connection
 
+    async def update_media_path(self, message_id: int, media_path: str):
+        """Update the media_path for a message in the database."""
+        conn = self.get_db_connection()
+        conn.execute('UPDATE messages SET media_path = ? WHERE message_id = ?', 
+                    (media_path, message_id))
+        conn.commit()
+
+    def set_client(self, client: TelegramClient):
+        """Set the TelegramClient instance."""
+        self.client = client
+
     def close_db_connections(self):
         conn = self.db_connection
         if conn:
             conn.close()
             self.db_connection = None
-        
-async def main():
-    scraper = OptimizedTelegramScraper()
-    await scraper.run()
