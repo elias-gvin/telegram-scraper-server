@@ -1,11 +1,5 @@
-import os
 import sqlite3
-import json
-import csv
 import asyncio
-import time
-import sys
-import uuid
 import warnings
 import logging
 from dataclasses import dataclass
@@ -17,6 +11,9 @@ from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, MessageMe
 from telethon.errors import FloodWaitError, SessionPasswordNeededError
 import qrcode
 from datetime import datetime
+from tqdm.asyncio import tqdm as atqdm
+from tqdm import tqdm
+
 
 warnings.filterwarnings("ignore", message="Using async sessions support is an experimental feature")
 
@@ -50,6 +47,7 @@ class ScrapeParams:
 MAX_CONCURRENT_DOWNLOADS = 5
 BATCH_SIZE = 100
 STATE_SAVE_INTERVAL = 50
+MEDIA_DOWNLOAD_BATCH_SIZE = 10
 
 class OptimizedTelegramScraper:
     def __init__(self, api_id: int, api_hash: str, scrape_params: ScrapeParams) -> None:
@@ -63,6 +61,7 @@ class OptimizedTelegramScraper:
         self.max_concurrent_downloads = MAX_CONCURRENT_DOWNLOADS
         self.batch_size = BATCH_SIZE
         self.state_save_interval = STATE_SAVE_INTERVAL
+        self.media_download_batch_size = MEDIA_DOWNLOAD_BATCH_SIZE
 
     async def download_media(self, message: Message) -> Optional[str]:
         channel = self.scrape_params.channel[0]
@@ -118,11 +117,11 @@ class OptimizedTelegramScraper:
         except Exception:
             return None
 
-    async def scrape_channel(self, channel: str, offset_id: int) -> List[MessageData]:
+    async def scrape_channel(self) -> List[MessageData]:
         try:
             channel = self.scrape_params.channel[0]
             entity = await self.client.get_entity(PeerChannel(int(channel)) if channel.startswith('-') else channel)
-            result = await self.client.get_messages(entity, offset_id=offset_id, reverse=True, limit=0)
+            result = await self.client.get_messages(entity, offset_date=self.scrape_params.start_date, reverse=True, limit=0)
             total_messages = result.total
 
             if total_messages == 0:
@@ -133,11 +132,11 @@ class OptimizedTelegramScraper:
 
             message_batch = []
             media_tasks = []
-            processed_messages = 0
-            last_message_id = offset_id
             semaphore = asyncio.Semaphore(self.max_concurrent_downloads)
 
-            async for message in self.client.iter_messages(entity, offset_id=offset_id, reverse=True):
+            # Wrap async iterator with tqdm for progress tracking
+            messages_iter = self.client.iter_messages(entity, offset_date=self.scrape_params.start_date, reverse=True)
+            async for message in atqdm(messages_iter, total=total_messages, desc="📄 Messages", unit="msg"):
                 try:
                     sender = await message.get_sender()
 
@@ -174,20 +173,9 @@ class OptimizedTelegramScraper:
                     if self.scrape_params.scrape_media and message.media and not isinstance(message.media, MessageMediaWebPage):
                         media_tasks.append(message)
 
-                    last_message_id = message.id
-                    processed_messages += 1
-
                     if len(message_batch) >= self.batch_size:
                         self.batch_insert_messages(channel, message_batch)
                         message_batch.clear()
-
-                    progress = (processed_messages / total_messages) * 100
-                    bar_length = 30
-                    filled_length = int(bar_length * processed_messages // total_messages)
-                    bar = '█' * filled_length + '░' * (bar_length - filled_length)
-                    
-                    sys.stdout.write(f"\r📄 Messages: [{bar}] {progress:.1f}% ({processed_messages}/{total_messages})")
-                    sys.stdout.flush()
 
                 except Exception as e:
                     logger.error(f"Error processing message {message.id}: {e}", exc_info=True)
@@ -197,7 +185,6 @@ class OptimizedTelegramScraper:
 
             if media_tasks:
                 total_media = len(media_tasks)
-                completed_media = 0
                 successful_downloads = 0
                 logger.info(f"Downloading {total_media} media files...")
                 
@@ -207,28 +194,21 @@ class OptimizedTelegramScraper:
                     async with semaphore:
                         return await self.download_media(channel, message)
                 
-                batch_size = 10
-                for i in range(0, len(media_tasks), batch_size):
-                    batch = media_tasks[i:i + batch_size]
-                    tasks = [asyncio.create_task(download_single_media(msg)) for msg in batch]
-                    
-                    for j, task in enumerate(tasks):
-                        try:
-                            media_path = await task
-                            if media_path:
-                                await self.update_media_path(channel, batch[j].id, media_path)
-                                successful_downloads += 1
-                        except Exception:
-                            pass
+                with tqdm(total=total_media, desc="📥 Media", unit="file") as pbar:
+                    for i in range(0, len(media_tasks), self.media_download_batch_size):
+                        batch = media_tasks[i:i + self.media_download_batch_size]
+                        tasks = [asyncio.create_task(download_single_media(msg)) for msg in batch]
                         
-                        completed_media += 1
-                        progress = (completed_media / total_media) * 100
-                        bar_length = 30
-                        filled_length = int(bar_length * completed_media // total_media)
-                        bar = '█' * filled_length + '░' * (bar_length - filled_length)
-                        
-                        sys.stdout.write(f"\r📥 Media: [{bar}] {progress:.1f}% ({completed_media}/{total_media})")
-                        sys.stdout.flush()
+                        for j, task in enumerate(tasks):
+                            try:
+                                media_path = await task
+                                if media_path:
+                                    await self.update_media_path(channel, batch[j].id, media_path)
+                                    successful_downloads += 1
+                            except Exception:
+                                pass
+                            
+                            pbar.update(1)
                 
                 logger.info(f"Media download complete! ({successful_downloads}/{total_media} successful)")
 
