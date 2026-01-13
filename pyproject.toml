@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "Telethon==1.40.0",
     "tqdm>=4.66.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
