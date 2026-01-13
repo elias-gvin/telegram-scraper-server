@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
+from datetime import datetime
 from telethon import TelegramClient
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, MessageMediaWebPage, User, PeerChannel, Channel, Chat, Message
 from telethon.errors import FloodWaitError, SessionPasswordNeededError
@@ -47,18 +48,30 @@ STATE_SAVE_INTERVAL = 50
 MEDIA_DOWNLOAD_BATCH_SIZE = 10
 
 class OptimizedTelegramScraper:
-    def __init__(self, api_id: int, api_hash: str, scrape_params: ScrapeParams) -> None:
-        self.api_id = api_id
-        self.api_hash = api_hash
+    def __init__(self, client: TelegramClient, db_connection: sqlite3.Connection, scrape_params: ScrapeParams) -> None:
+        self.client = client
+        self.db_connection = db_connection
         self.scrape_params = scrape_params
-
-        self.client = None
-        self.db_connection = None
         
         self.max_concurrent_downloads = MAX_CONCURRENT_DOWNLOADS
         self.batch_size = BATCH_SIZE
         self.state_save_interval = STATE_SAVE_INTERVAL
         self.media_download_batch_size = MEDIA_DOWNLOAD_BATCH_SIZE
+
+    def _check_db_connection(self) -> bool:
+        """Check if database connection is alive."""
+        try:
+            self.db_connection.execute("SELECT 1")
+            return True
+        except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+            return False
+
+    async def _check_client_connection(self) -> bool:
+        """Check if Telegram client is connected and authorized."""
+        try:
+            return self.client.is_connected() and await self.client.is_user_authorized()
+        except Exception:
+            return False
 
     async def download_media(self, message: Message) -> Optional[str]:
         if not message.media or not self.scrape_params.scrape_media:
@@ -115,8 +128,12 @@ class OptimizedTelegramScraper:
             return None
 
     async def scrape_channel(self) -> None:
-        if not self.client:
-            raise ValueError("TelegramClient not initialized. Call set_client() first.")
+        # Check connections before starting
+        if not self._check_db_connection():
+            raise ConnectionError("Database connection is not alive. Please reconnect.")
+        
+        if not await self._check_client_connection():
+            raise ConnectionError("Telegram client is not connected or not authorized. Please reconnect.")
         
         try:
             channel = self.scrape_params.channel[0]
@@ -130,6 +147,20 @@ class OptimizedTelegramScraper:
 
             logger.info(f"Found {total_messages} messages in channel {channel}")
 
+            # Parse end_date if provided
+            end_date_dt = None
+            if self.scrape_params.end_date:
+                try:
+                    # Try parsing with time first, then date only
+                    try:
+                        end_date_dt = datetime.strptime(self.scrape_params.end_date, '%Y-%m-%d %H:%M:%S')
+                    except ValueError:
+                        end_date_dt = datetime.strptime(self.scrape_params.end_date, '%Y-%m-%d')
+                    logger.info(f"Filtering messages up to end_date: {end_date_dt}")
+                except ValueError as e:
+                    logger.warning(f"Invalid end_date format '{self.scrape_params.end_date}'. Expected 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'. Ignoring end_date filter.")
+                    end_date_dt = None
+
             message_batch = []
             media_tasks = []
 
@@ -137,6 +168,11 @@ class OptimizedTelegramScraper:
             messages_iter = self.client.iter_messages(entity, offset_date=self.scrape_params.start_date, reverse=True)
             async for message in atqdm(messages_iter, total=total_messages, desc="📄 Messages", unit="msg"):
                 try:
+                    # Filter out messages after end_date
+                    if end_date_dt and message.date > end_date_dt:
+                        logger.info(f"Reached end_date ({end_date_dt}). Stopping message collection.")
+                        break
+
                     sender = await message.get_sender()
 
                     reactions_str = None
@@ -220,89 +256,28 @@ class OptimizedTelegramScraper:
         if not messages:
             return
 
-        conn = self.get_db_connection()
+        if not self._check_db_connection():
+            raise ConnectionError("Database connection is not alive. Cannot insert messages.")
+
         data = [(msg.message_id, msg.date, msg.sender_id, msg.first_name,
                 msg.last_name, msg.username, msg.message, msg.media_type,
                 msg.media_path, msg.reply_to, msg.post_author, msg.views,
                 msg.forwards, msg.reactions) for msg in messages]
 
-        conn.executemany('''INSERT OR IGNORE INTO messages
+        self.db_connection.executemany('''INSERT OR IGNORE INTO messages
                            (message_id, date, sender_id, first_name, last_name, username,
                             message, media_type, media_path, reply_to, post_author, views,
                             forwards, reactions)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', data)
-        conn.commit()
+        self.db_connection.commit()
 
-    def get_db_connection(self) -> sqlite3.Connection:
-        channel = self.scrape_params.channel[0]
-        if not self.db_connection:
-            output_dir = Path(self.scrape_params.output_dir)
-            output_dir.mkdir(exist_ok=True)
-            channel_dir = Path(output_dir / channel)
-            channel_dir.mkdir(exist_ok=True)
-
-            db_file = channel_dir / f'{channel}.db'
-            conn = sqlite3.connect(str(db_file), check_same_thread=False)
-            conn.execute('''CREATE TABLE IF NOT EXISTS messages
-                          (id INTEGER PRIMARY KEY, message_id INTEGER UNIQUE, date TEXT,
-                           sender_id INTEGER, first_name TEXT, last_name TEXT, username TEXT,
-                           message TEXT, media_type TEXT, media_path TEXT, reply_to INTEGER,
-                           post_author TEXT, views INTEGER, forwards INTEGER, reactions TEXT)''')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_message_id ON messages(message_id)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_date ON messages(date)')
-            conn.execute('PRAGMA journal_mode=WAL')
-            conn.execute('PRAGMA synchronous=NORMAL')
-            conn.commit()
-
-            self.db_connection = conn
-
-        return self.db_connection
 
     async def update_media_path(self, message_id: int, media_path: str):
         """Update the media_path for a message in the database."""
-        conn = self.get_db_connection()
-        conn.execute('UPDATE messages SET media_path = ? WHERE message_id = ?', 
+        if not self._check_db_connection():
+            raise ConnectionError("Database connection is not alive. Cannot update media path.")
+        
+        self.db_connection.execute('UPDATE messages SET media_path = ? WHERE message_id = ?', 
                     (media_path, message_id))
-        conn.commit()
+        self.db_connection.commit()
 
-    async def initialize_client(self):
-        if not all([self.api_id, self.api_hash]):
-            error_message = "API Configuration Required"
-            logger.error(error_message)
-            raise ValueError(error_message)
-
-        self.client = TelegramClient('session', self.api_id, self.api_hash)
-        
-        try:
-            await self.client.connect()
-        except Exception as e:
-            logger.error(f"Failed to connect: {e}")
-            return False
-        
-        if not await self.client.is_user_authorized():
-            print("\n=== Choose Authentication Method ===")
-            print("[1] QR Code (Recommended - No phone number needed)")
-            print("[2] Phone Number (Traditional method)")
-            
-            while True:
-                choice = input("Enter your choice (1 or 2): ").strip()
-                if choice in ['1', '2']:
-                    break
-                print("Please enter 1 or 2")
-            
-            success = await self.qr_code_auth() if choice == '1' else await self.phone_auth()
-                
-            if not success:
-                print("Authentication failed. Please try again.")
-                await self.client.disconnect()
-                return False
-        else:
-            print("✅ Already authenticated!")
-            
-        return True
-
-    def close_db_connections(self):
-        conn = self.db_connection
-        if conn:
-            conn.close()
-            self.db_connection = None
