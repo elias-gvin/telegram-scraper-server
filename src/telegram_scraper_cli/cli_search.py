@@ -104,30 +104,31 @@ async def main():
         client = await authorize_telegram_client(api_id, api_hash, session_name)
         
         if args.list_all:
-            logger.info("Listing all channels and groups...")
+            print("Listing all channels and groups...")
             results = await list_all_channels(client, limit=args.limit)
         else:
-            logger.info(f"Searching for channels/groups matching '{args.query}'...")
+            print(f"Searching for channels/groups matching '{args.query}'...")
             results = await search_channels(client, args.query, limit=args.limit)
         
         # Print results
         if not results:
-            logger.info("No results found")
+            print("No results found")
         else:
-            logger.info(f"\n{'='*80}")
-            logger.info(f"Found {len(results)} result(s):")
-            logger.info(f"{'='*80}")
+            print(f"\n{'='*80}")
+            print(f"Found {len(results)} result(s):")
+            print(f"{'='*80}")
             for i, result in enumerate(results, 1):
-                logger.info(f"\n[{i}] {result['title']}")
-                logger.info(f"    ID: {result['id']}")
-                logger.info(f"    Type: {result['type']}")
+                print(f"\n[{i}] {result['title']}")
+                print(f"    ID: {result['id']}")
+                print(f"    Type: {result['type']}")
                 if result['username']:
-                    logger.info(f"    Username: @{result['username']}")
+                    print(f"    Username: @{result['username']}")
                 if result['participants_count']:
-                    logger.info(f"    Participants: {result['participants_count']}")
-            logger.info(f"\n{'='*80}")
+                    print(f"    Participants: {result['participants_count']}")
+            print(f"\n{'='*80}")
         
     except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
         logger.error(f"Error: {e}", exc_info=True)
         sys.exit(1)
     finally:
@@ -139,6 +140,6 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        print("\nInterrupted by user")
         sys.exit(0)
 

@@ -10,7 +10,7 @@ from telethon import TelegramClient
 from .auth import authorize_telegram_client
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.ERROR,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -38,26 +38,27 @@ async def main():
     
     session_name = os.getenv("TELEGRAM_SESSION_NAME", "session")
     
-    logger.info("Starting Telegram authorization...")
-    logger.info(f"Using session file: {session_name}.session")
+    print("Starting Telegram authorization...")
+    print(f"Using session file: {session_name}.session")
     
     client = None
     try:
         client = await authorize_telegram_client(api_id, api_hash, session_name)
-        logger.info("✅ Authorization successful! You can now use other tools.")
+        print("✅ Authorization successful! You can now use other tools.")
     except Exception as e:
-        logger.error(f"❌ Authorization failed: {e}")
+        print(f"❌ Authorization failed: {e}", file=sys.stderr)
+        logger.error(f"Authorization failed: {e}", exc_info=True)
         sys.exit(1)
     finally:
         if client:
             await client.disconnect()
-            logger.info("Disconnected from Telegram")
+            logger.debug("Disconnected from Telegram")
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        print("\nInterrupted by user")
         sys.exit(0)
 

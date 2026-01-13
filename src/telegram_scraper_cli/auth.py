@@ -1,7 +1,9 @@
 """Tool for Telegram client authorization."""
 
 import logging
+from io import StringIO
 from pathlib import Path
+import qrcode
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 
@@ -36,20 +38,20 @@ async def authorize_telegram_client(
         
         # Check if already authorized
         if await client.is_user_authorized():
-            logger.info("✅ Already authenticated!")
+            print("✅ Already authenticated!")
             return client
         
         # Need to authenticate
-        logger.info("\n=== Authentication Required ===")
-        logger.info("Choose authentication method:")
-        logger.info("[1] QR Code (Recommended - No phone number needed)")
-        logger.info("[2] Phone Number (Traditional method)")
+        print("\n=== Authentication Required ===")
+        print("Choose authentication method:")
+        print("[1] QR Code (Recommended - No phone number needed)")
+        print("[2] Phone Number (Traditional method)")
         
         while True:
             choice = input("Enter your choice (1 or 2): ").strip()
             if choice in ['1', '2']:
                 break
-            logger.warning("Please enter 1 or 2")
+            print("Please enter 1 or 2")
         
         if choice == '1':
             success = await _qr_code_auth(client)
@@ -60,7 +62,7 @@ async def authorize_telegram_client(
             await client.disconnect()
             raise ConnectionError("Failed to authorize Telegram client")
         
-        logger.info("✅ Authorization successful!")
+        print("✅ Authorization successful!")
         return client
         
     except Exception as e:
@@ -70,32 +72,46 @@ async def authorize_telegram_client(
         raise
 
 
+def _display_qr_code_ascii(qr_login) -> None:
+    """Display QR code as ASCII art."""
+    qr = qrcode.QRCode(box_size=1, border=1)
+    qr.add_data(qr_login.url)
+    qr.make()
+    
+    f = StringIO()
+    qr.print_ascii(out=f)
+    f.seek(0)
+    print(f.read())
+
+
 async def _qr_code_auth(client: TelegramClient) -> bool:
     """Authenticate using QR code."""
-    logger.info("\nPlease scan the QR code with your Telegram app:")
-    logger.info("1. Open Telegram on your phone")
-    logger.info("2. Go to Settings > Devices > Scan QR")
-    logger.info("3. Scan the code below\n")
+    print("\nPlease scan the QR code with your Telegram app:")
+    print("1. Open Telegram on your phone")
+    print("2. Go to Settings > Devices > Scan QR")
+    print("3. Scan the code below\n")
     
     try:
         qr_login = await client.qr_login()
-        logger.info(f"\nQR Code URL: {qr_login.url}")
-        logger.info("Scan the QR code with your Telegram app...")
+        _display_qr_code_ascii(qr_login)
+        print("\nScan the QR code with your Telegram app...")
         
         await qr_login.wait()
-        logger.info("\n✅ Successfully logged in via QR code!")
+        print("\n✅ Successfully logged in via QR code!")
         return True
     except SessionPasswordNeededError:
         password = input("Two-factor authentication enabled. Enter your password: ")
         try:
             await client.sign_in(password=password)
-            logger.info("\n✅ Successfully logged in with 2FA!")
+            print("\n✅ Successfully logged in with 2FA!")
             return True
         except Exception as e:
-            logger.error(f"\n❌ 2FA authentication failed: {e}")
+            print(f"\n❌ 2FA authentication failed: {e}")
+            logger.error(f"2FA authentication failed: {e}", exc_info=True)
             return False
     except Exception as e:
-        logger.error(f"\n❌ QR code authentication failed: {e}")
+        print(f"\n❌ QR code authentication failed: {e}")
+        logger.error(f"QR code authentication failed: {e}", exc_info=True)
         return False
 
 
@@ -108,14 +124,15 @@ async def _phone_auth(client: TelegramClient) -> bool:
         
         try:
             await client.sign_in(phone, code)
-            logger.info("\n✅ Successfully logged in via phone!")
+            print("\n✅ Successfully logged in via phone!")
             return True
         except SessionPasswordNeededError:
             password = input("Two-factor authentication enabled. Enter your password: ")
             await client.sign_in(password=password)
-            logger.info("\n✅ Successfully logged in with 2FA!")
+            print("\n✅ Successfully logged in with 2FA!")
             return True
     except Exception as e:
-        logger.error(f"\n❌ Phone authentication failed: {e}")
+        print(f"\n❌ Phone authentication failed: {e}")
+        logger.error(f"Phone authentication failed: {e}", exc_info=True)
         return False
 
