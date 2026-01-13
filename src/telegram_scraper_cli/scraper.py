@@ -73,6 +73,18 @@ class OptimizedTelegramScraper:
         except Exception:
             return False
 
+    def populate_db_schema(self) -> None:
+        self.db_connection.execute('''CREATE TABLE IF NOT EXISTS messages
+                           (id INTEGER PRIMARY KEY, message_id INTEGER UNIQUE, date TEXT,
+                            sender_id INTEGER, first_name TEXT, last_name TEXT, username TEXT,
+                            message TEXT, media_type TEXT, media_path TEXT, reply_to INTEGER,
+                            post_author TEXT, views INTEGER, forwards INTEGER, reactions TEXT)''')
+        self.db_connection.execute('CREATE INDEX IF NOT EXISTS idx_message_id ON messages(message_id)')
+        self.db_connection.execute('CREATE INDEX IF NOT EXISTS idx_date ON messages(date)')
+        self.db_connection.execute('PRAGMA journal_mode=WAL')
+        self.db_connection.execute('PRAGMA synchronous=NORMAL')
+        self.db_connection.commit()
+
     async def download_media(self, message: Message) -> Optional[str]:
         if not message.media or not self.scrape_params.scrape_media:
             return None
@@ -134,6 +146,9 @@ class OptimizedTelegramScraper:
         
         if not await self._check_client_connection():
             raise ConnectionError("Telegram client is not connected or not authorized. Please reconnect.")
+        
+        # Initialize database schema
+        self.populate_db_schema()
         
         try:
             channel = self.scrape_params.channel[0]

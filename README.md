@@ -12,3 +12,11 @@ For the tool that should dump data to db, there should be params:
 We should have separate table, which stores the following data:
 - latest sync. Chat that synced. Specified dates. Was media sync on/off. And was this dump successfull or not.
 We would need this for figuring out quicly dates to start from next dump. 
+
+I want separate tools:
+- for authorization
+- for group/channel search by name
+- for dump of the specific group/channel
+
+Also, I want to store if dump was successfull.
+And error if not: "failed to download media" or "failed to finish scrape (unknown error)" or "not authorized". We should have separate table with error types.
