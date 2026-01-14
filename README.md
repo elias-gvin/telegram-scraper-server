@@ -20,3 +20,14 @@ I want separate tools:
 
 Also, I want to store if dump was successfull.
 And error if not: "failed to download media" or "failed to finish scrape (unknown error)" or "not authorized". We should have separate table with error types.
+
+TODO:
+add search by id to search
+create common cli interface for all tools
+add tool for dumping everything to csv or json
+fix hardcode in scrape.py, simplify interface, refactor
+ensure stuff with data. You can have access to chat, but don't have permissions
+mb combine every tool in 1 single pipeline (like it was with original tool)?
+AAAAA
+Add table which catches the last successfull data dump
+Add param which downloads everything AFTER the latest successfull data dump

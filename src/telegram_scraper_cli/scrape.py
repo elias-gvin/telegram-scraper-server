@@ -2,15 +2,19 @@ import sqlite3
 import asyncio
 import warnings
 import logging
+import sys
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from telethon import TelegramClient
-from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, MessageMediaWebPage, User, PeerChannel, Channel, Chat, Message
+from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, MessageMediaWebPage, User, PeerChannel, PeerChat, Channel, Chat, Message
 from telethon.errors import FloodWaitError, SessionPasswordNeededError
 from tqdm.asyncio import tqdm as atqdm
 from tqdm import tqdm
+from dotenv import load_dotenv
+import os
+from .auth import authorize_telegram_client
 
 
 warnings.filterwarnings("ignore", message="Using async sessions support is an experimental feature")
@@ -38,7 +42,7 @@ class MessageData:
 class ScrapeParams:
     start_date: Optional[str]
     end_date: Optional[str]
-    channel: Tuple[str, int]
+    channel: Tuple[str, str]
     scrape_media: bool
     output_dir: Path
 
@@ -151,9 +155,31 @@ class OptimizedTelegramScraper:
         self.populate_db_schema()
         
         try:
-            channel = self.scrape_params.channel[0]
-            entity = await self.client.get_entity(PeerChannel(int(channel)) if channel.startswith('-') else channel)
-            result = await self.client.get_messages(entity, offset_date=self.scrape_params.start_date, reverse=True, limit=0)
+            channel = self.scrape_params.channel[1]
+            logger.error(f"!!! Scraping channel {channel} with name {self.scrape_params.channel[0]}")
+            entity = await self.client.get_entity(-5263097314) # TODO: remove hardcoded channel id
+
+            # Telethon expects datetime (or None) for offset_date, not a string.
+            start_date_dt = None
+            if self.scrape_params.start_date:
+                try:
+                    try:
+                        start_date_dt = datetime.strptime(self.scrape_params.start_date, "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        start_date_dt = datetime.strptime(self.scrape_params.start_date, "%Y-%m-%d")
+                    # Telethon message dates are timezone-aware (UTC). Make filters UTC-aware too.
+                    if start_date_dt.tzinfo is None:
+                        start_date_dt = start_date_dt.replace(tzinfo=timezone.utc)
+                    logger.info(f"Filtering messages from start_date: {start_date_dt}")
+                except ValueError:
+                    logger.warning(
+                        f"Invalid start_date format '{self.scrape_params.start_date}'. Expected 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'. Ignoring start_date filter."
+                    )
+                    start_date_dt = None
+
+            result = await self.client.get_messages(
+                entity, offset_date=start_date_dt, reverse=True, limit=0
+            )
             total_messages = result.total
 
             if total_messages == 0:
@@ -171,6 +197,9 @@ class OptimizedTelegramScraper:
                         end_date_dt = datetime.strptime(self.scrape_params.end_date, '%Y-%m-%d %H:%M:%S')
                     except ValueError:
                         end_date_dt = datetime.strptime(self.scrape_params.end_date, '%Y-%m-%d')
+                    # Telethon message dates are timezone-aware (UTC). Make filters UTC-aware too.
+                    if end_date_dt.tzinfo is None:
+                        end_date_dt = end_date_dt.replace(tzinfo=timezone.utc)
                     logger.info(f"Filtering messages up to end_date: {end_date_dt}")
                 except ValueError as e:
                     logger.warning(f"Invalid end_date format '{self.scrape_params.end_date}'. Expected 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'. Ignoring end_date filter.")
@@ -180,7 +209,9 @@ class OptimizedTelegramScraper:
             media_tasks = []
 
             # Wrap async iterator with tqdm for progress tracking
-            messages_iter = self.client.iter_messages(entity, offset_date=self.scrape_params.start_date, reverse=True)
+            messages_iter = self.client.iter_messages(
+                entity, offset_date=start_date_dt, reverse=True
+            )
             async for message in atqdm(messages_iter, total=total_messages, desc="📄 Messages", unit="msg"):
                 try:
                     # Filter out messages after end_date
@@ -296,3 +327,76 @@ class OptimizedTelegramScraper:
                     (media_path, message_id))
         self.db_connection.commit()
 
+
+async def main() -> None:
+    load_dotenv()
+    api_id = os.getenv("TELEGRAM_API_ID")
+    api_hash = os.getenv("TELEGRAM_API_HASH")
+    session_name = os.getenv("TELEGRAM_SESSION_NAME", "session")
+    # TODO: add proper checks for read values.
+    client = await authorize_telegram_client(api_id, api_hash, session_name)
+
+    output_dir = Path("./output")
+    channel_id = "-5263097314"
+    channel_name = "NotesScraperTest"
+    start_date = "2024-01-01"
+    end_date = "2026-12-31"
+    scrape_media = True
+
+    db_connection = None
+    
+    try:
+        # Create database connection
+        logger.info(f"Creating database connection for channel {channel_id}...")
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        channel_dir = output_dir / channel_id
+        channel_dir.mkdir(parents=True, exist_ok=True)
+        
+        db_file = channel_dir / f'{channel_id}.db'
+        db_connection = sqlite3.connect(str(db_file), check_same_thread=False)
+        logger.info("✅ Database connection created")
+        
+        # # Get channel entity to extract channel name (optional, for logging)
+        # try:
+        #     entity = await client.get_entity(PeerChannel(int(channel_id)) if channel_id.startswith('-') else channel_id)
+        #     channel_name = getattr(entity, 'title', channel_id) or channel_id
+        # except Exception:
+        #     channel_name = channel_id
+        
+        # Create scrape parameters
+        scrape_params = ScrapeParams(
+            start_date=start_date,
+            end_date=end_date,
+            channel=(channel_name, channel_id),  # Tuple[str, int] - int is not used by scraper
+            scrape_media=scrape_media,
+            output_dir=Path(output_dir)
+        )
+        
+        # Create scraper instance
+        scraper = OptimizedTelegramScraper(
+            client=client,
+            db_connection=db_connection,
+            scrape_params=scrape_params
+        )
+        
+        # Run the scraper
+        logger.info(f"Starting dump for channel {channel_id} ({channel_name})...")
+        await scraper.scrape_channel()
+        logger.info("✅ Dump completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Error during dump: {e}", exc_info=True)
+        raise
+    finally:
+        # Cleanup
+        if db_connection:
+            db_connection.close()
+            logger.info("Database connection closed")
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+        sys.exit(0)

@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat
 import asyncio
@@ -118,7 +118,7 @@ async def main():
     session_name = os.getenv("TELEGRAM_SESSION_NAME", "session")
     # TODO: add proper checks for read values.
     client = await authorize_telegram_client(api_id, api_hash, session_name)
-    results = await search_channels_by_title(client, "saved", similarity_threshold=80)
+    results = await search_channels_by_title(client, "NotesScraperTest", similarity_threshold=80)
     for result, score in results:
         print(f"{result}")
         print(f"Score: {score}\n")
