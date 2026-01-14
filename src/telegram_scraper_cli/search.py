@@ -7,6 +7,7 @@ from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat
 import asyncio
 from dotenv import load_dotenv
+from rapidfuzz import fuzz
 
 from .auth import authorize_telegram_client
 
@@ -16,24 +17,29 @@ logger = logging.getLogger(__name__)
 async def search_channels(
     client: TelegramClient,
     search_query: str,
-    limit: Optional[int] = None
+    limit: Optional[int] = None,
+    min_similarity: int = 50,
+    use_fuzzy: bool = True
 ) -> List[Dict[str, Any]]:
     """
-    Search for channels and groups by name.
+    Search for channels and groups by name using fuzzy matching.
     
     Args:
         client: Authorized TelegramClient instance
         search_query: Search query (channel/group name or username)
-        limit: Maximum number of results to return (None for all)
+        limit: Maximum number of results to return (None for all, applies to dialog iteration)
+        min_similarity: Minimum similarity score (0-100) for fuzzy matching (default: 50)
+        use_fuzzy: Whether to use fuzzy matching (default: True). If False, uses exact substring matching.
         
     Returns:
-        List of dictionaries containing channel/group information:
+        List of dictionaries containing channel/group information, sorted by similarity score (highest first):
         {
             'title': str,
             'id': str,
             'username': Optional[str],
             'type': str,  # 'Channel' or 'Group'
-            'participants_count': Optional[int]
+            'participants_count': Optional[int],
+            'similarity_score': float  # Similarity score (0-100)
         }
     """
     if not client.is_connected():
@@ -45,7 +51,7 @@ async def search_channels(
     results = []
     search_lower = search_query.lower()
     
-    logger.info(f"Searching for channels/groups matching '{search_query}'...")
+    logger.info(f"Searching for channels/groups matching '{search_query}' (fuzzy: {use_fuzzy}, min_similarity: {min_similarity})...")
     
     try:
         async for dialog in client.iter_dialogs(limit=limit):
@@ -55,27 +61,58 @@ async def search_channels(
             if dialog.id == 777000 or (not isinstance(entity, Channel) and not isinstance(entity, Chat)):
                 continue
             
-            # Check if matches search query
+            # Get channel/group information
             title = dialog.title or ""
             username = getattr(entity, 'username', None) or ""
+            channel_type = "Channel" if isinstance(entity, Channel) and entity.broadcast else "Group"
+            participants_count = getattr(entity, 'participants_count', None)
             
-            if (search_lower in title.lower() or 
-                search_lower in username.lower() or
-                search_query in str(dialog.id)):
+            # Calculate similarity scores
+            similarity_score = 0.0
+            matched = False
+            
+            if use_fuzzy:
+                # Calculate fuzzy match scores for title and username
+                title_score = fuzz.partial_ratio(search_query.lower(), title.lower())
+                username_score = fuzz.partial_ratio(search_query.lower(), username.lower()) if username else 0
                 
-                channel_type = "Channel" if isinstance(entity, Channel) and entity.broadcast else "Group"
-                participants_count = getattr(entity, 'participants_count', None)
+                # Use the highest score between title and username
+                similarity_score = max(title_score, username_score)
                 
+                # Also check exact ID match for bonus
+                if search_query in str(dialog.id):
+                    similarity_score = max(similarity_score, 100.0)
+                
+                # Include if similarity meets threshold
+                if similarity_score >= min_similarity:
+                    matched = True
+            else:
+                # Exact substring matching (original behavior)
+                if (search_lower in title.lower() or 
+                    search_lower in username.lower() or
+                    search_query in str(dialog.id)):
+                    matched = True
+                    # Calculate a simple similarity for exact matches
+                    if search_lower == title.lower() or search_lower == username.lower():
+                        similarity_score = 100.0
+                    else:
+                        similarity_score = 80.0
+            
+            if matched:
                 result = {
                     'title': title,
                     'id': str(dialog.id),
                     'username': username if username else None,
                     'type': channel_type,
-                    'participants_count': participants_count
+                    'participants_count': participants_count,
+                    'similarity_score': round(similarity_score, 2)
                 }
                 results.append(result)
                 
-                logger.info(f"Found: {title} (ID: {dialog.id}, Type: {channel_type}, Username: @{username})")
+                logger.info(f"Found: {title} (ID: {dialog.id}, Type: {channel_type}, Similarity: {similarity_score:.2f}%)")
+        
+        # Sort by similarity score (highest first)
+        results.sort(key=lambda x: x['similarity_score'], reverse=True)
         
         logger.info(f"✅ Found {len(results)} matching channels/groups")
         return results
@@ -180,6 +217,8 @@ async def main():
                 print(f"    Username: @{result['username']}")
             if result['participants_count']:
                 print(f"    Participants: {result['participants_count']}")
+            if 'similarity_score' in result:
+                print(f"    Similarity: {result['similarity_score']}%")
             print()
 
 if __name__ == "__main__":
