@@ -1,5 +1,3 @@
-"""CLI tool for Telegram authorization."""
-
 import asyncio
 import logging
 import os
@@ -20,66 +18,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-
-async def authorize_telegram_client(
-    api_id: int, api_hash: str, session_name: str = "session"
-) -> TelegramClient:
-    """
-    Create, connect, and authorize a Telegram client.
-
-    Args:
-        api_id: Telegram API ID
-        api_hash: Telegram API Hash
-        session_name: Name for the session file (default: 'session')
-
-    Returns:
-        Authorized TelegramClient instance
-
-    Raises:
-        ConnectionError: If connection or authorization fails
-    """
-    client = TelegramClient(session_name, api_id, api_hash)
-
-    try:
-        logger.info("Connecting to Telegram...")
-        await client.connect()
-        logger.info("✅ Connected to Telegram")
-
-        # Check if already authorized
-        if await client.is_user_authorized():
-            print("✅ Already authenticated!")
-            return client
-
-        # Need to authenticate
-        print("\n=== Authentication Required ===")
-        print("Choose authentication method:")
-        print("[1] QR Code (Recommended - No phone number needed)")
-        print("[2] Phone Number (Traditional method)")
-
-        while True:
-            choice = input("Enter your choice (1 or 2): ").strip()
-            if choice in ["1", "2"]:
-                break
-            print("Please enter 1 or 2")
-
-        if choice == "1":
-            success = await _qr_code_auth(client)
-        else:
-            success = await _phone_auth(client)
-
-        if not success:
-            await client.disconnect()
-            raise ConnectionError("Failed to authorize Telegram client")
-
-        print("✅ Authorization successful!")
-        return client
-
-    except Exception as e:
-        if client.is_connected():
-            await client.disconnect()
-        logger.error(f"Authorization failed: {e}")
-        raise
 
 
 def _display_qr_code_ascii(qr_login) -> None:
@@ -147,6 +85,67 @@ async def _phone_auth(client: TelegramClient) -> bool:
         return False
 
 
+async def authorize_telegram_client(
+    api_id: int, api_hash: str, session_name: str = "session"
+) -> TelegramClient:
+    """
+    Create, connect, and authorize a Telegram client.
+
+    Args:
+        api_id: Telegram API ID
+        api_hash: Telegram API Hash
+        session_name: Name for the session file (default: 'session')
+
+    Returns:
+        Authorized TelegramClient instance
+
+    Raises:
+        ConnectionError: If connection or authorization fails
+    """
+    client = TelegramClient(session_name, api_id, api_hash)
+
+    try:
+        logger.info("Connecting to Telegram...")
+        await client.connect()
+        logger.info("✅ Connected to Telegram")
+
+        # Check if already authorized
+        if await client.is_user_authorized():
+            print("✅ Already authenticated!")
+            return client
+
+        # Need to authenticate
+        print("\n=== Authentication Required ===")
+        print("Choose authentication method:")
+        print("[1] QR Code (Recommended - No phone number needed)")
+        print("[2] Phone Number (Traditional method)")
+
+        while True:
+            choice = input("Enter your choice (1 or 2): ").strip()
+            if choice in ["1", "2"]:
+                break
+            print("Please enter 1 or 2")
+
+        if choice == "1":
+            success = await _qr_code_auth(client)
+        else:
+            success = await _phone_auth(client)
+
+        if not success:
+            await client.disconnect()
+            raise ConnectionError("Failed to authorize Telegram client")
+
+        print("✅ Authorization successful!")
+        return client
+
+    except Exception as e:
+        if client.is_connected():
+            await client.disconnect()
+        logger.error(f"Authorization failed: {e}")
+        raise
+
+
+# TODO: add ability to specify session name and credentials from command line.
 async def main():
     """Main function for authorization CLI."""
     # Load environment variables
