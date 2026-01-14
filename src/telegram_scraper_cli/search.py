@@ -1,9 +1,14 @@
 """Tool for searching Telegram channels and groups by name."""
 
 import logging
+import os
 from typing import List, Dict, Optional, Any
 from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat
+import asyncio
+from dotenv import load_dotenv
+
+from .auth import authorize_telegram_client
 
 logger = logging.getLogger(__name__)
 
@@ -132,3 +137,50 @@ async def list_all_channels(
         logger.error(f"Error listing channels: {e}")
         raise
 
+# TODO: add ability to specify session name and credentials from command line.
+# TODO: add ability to search by name.
+async def main():
+    # args = parse_args()
+    # logging.getLogger().setLevel(getattr(logging, args.log_level.upper()))
+    
+    load_dotenv()
+    api_id = os.getenv("TELEGRAM_API_ID")
+    api_hash = os.getenv("TELEGRAM_API_HASH")
+    session_name = os.getenv("TELEGRAM_SESSION_NAME", "session")
+    # TODO: add proper checks for read values.
+    client = await authorize_telegram_client(api_id, api_hash, session_name)
+    limit = 100 # TODO: add ability to specify limit from command line.
+    results = await list_all_channels(client, limit=limit)
+    
+    # Print results
+    if not results:
+        print("No results found")
+    else:
+        print(f"\nFound {len(results)} result(s):\n")
+        for i, result in enumerate(results, 1):
+            print(f"    Title: {result['title']}")
+            print(f"    ID: {result['id']}")
+            print(f"    Type: {result['type']}")
+            if result['username']:
+                print(f"    Username: @{result['username']}")
+            if result['participants_count']:
+                print(f"    Participants: {result['participants_count']}")
+            print()
+
+    result = await search_channels(client, "SAVED INFO (REGULAR)", limit=limit)
+    if not result:
+        print("No results found")
+    else:
+        print(f"\nFound {len(result)} result(s):\n")
+        for i, result in enumerate(result, 1):
+            print(f"    Title: {result['title']}")
+            print(f"    ID: {result['id']}")
+            print(f"    Type: {result['type']}")
+            if result['username']:
+                print(f"    Username: @{result['username']}")
+            if result['participants_count']:
+                print(f"    Participants: {result['participants_count']}")
+            print()
+
+if __name__ == "__main__":
+    asyncio.run(main())

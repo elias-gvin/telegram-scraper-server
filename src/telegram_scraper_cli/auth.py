@@ -3,13 +3,17 @@ import logging
 import os
 import sys
 from dotenv import load_dotenv
-from telethon import TelegramClient
-import logging
 from io import StringIO
 from pathlib import Path
 import qrcode
 from telethon import TelegramClient
-from telethon.errors import SessionPasswordNeededError
+from telethon.errors import (
+    SessionPasswordNeededError,
+    PhoneCodeInvalidError,
+    PhoneCodeExpiredError,
+    PhoneNumberInvalidError,
+    FloodWaitError,
+)
 
 logging.basicConfig(
     level=logging.ERROR,
@@ -67,18 +71,63 @@ async def _phone_auth(client: TelegramClient) -> bool:
     """Authenticate using phone number."""
     try:
         phone = input("Enter your phone number: ")
-        await client.send_code_request(phone)
-        code = input("Enter the code you received: ")
-
         try:
-            await client.sign_in(phone, code)
-            print("\n✅ Successfully logged in via phone!")
-            return True
-        except SessionPasswordNeededError:
-            password = input("Two-factor authentication enabled. Enter your password: ")
-            await client.sign_in(password=password)
-            print("\n✅ Successfully logged in with 2FA!")
-            return True
+            await client.send_code_request(phone)
+        except PhoneNumberInvalidError:
+            print("\n❌ Invalid phone number. Please check and try again.")
+            logger.error("Invalid phone number provided")
+            return False
+        except FloodWaitError as e:
+            print(f"\n❌ Too many requests. Please wait {e.seconds} seconds before trying again.")
+            logger.error(f"FloodWaitError: Wait {e.seconds} seconds")
+            return False
+        except Exception as e:
+            print(f"\n❌ Failed to send code: {e}")
+            logger.error(f"Failed to send code: {e}", exc_info=True)
+            return False
+
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                print(f"\nAttempt {attempt + 1} of {max_attempts}")
+            code = input("Enter the code you received: ")
+
+            try:
+                await client.sign_in(phone, code)
+                print("\n✅ Successfully logged in via phone!")
+                return True
+            except PhoneCodeInvalidError:
+                if attempt < max_attempts - 1:
+                    print(f"\n❌ Invalid code. Please try again ({max_attempts - attempt - 1} attempt(s) remaining).")
+                    logger.warning(f"Invalid phone code (attempt {attempt + 1})")
+                else:
+                    print("\n❌ Invalid code. Maximum attempts reached.")
+                    logger.error("Invalid phone code: Maximum attempts reached")
+                    return False
+            except PhoneCodeExpiredError:
+                print("\n❌ The code has expired. Please request a new code.")
+                logger.error("Phone code expired")
+                return False
+            except SessionPasswordNeededError:
+                password = input("Two-factor authentication enabled. Enter your password: ")
+                try:
+                    await client.sign_in(password=password)
+                    print("\n✅ Successfully logged in with 2FA!")
+                    return True
+                except Exception as e:
+                    print(f"\n❌ 2FA authentication failed: {e}")
+                    logger.error(f"2FA authentication failed: {e}", exc_info=True)
+                    return False
+            except FloodWaitError as e:
+                print(f"\n❌ Too many requests. Please wait {e.seconds} seconds before trying again.")
+                logger.error(f"FloodWaitError during sign-in: Wait {e.seconds} seconds")
+                return False
+            except Exception as e:
+                print(f"\n❌ Authentication failed: {e}")
+                logger.error(f"Phone authentication failed: {e}", exc_info=True)
+                return False
+
+        return False
     except Exception as e:
         print(f"\n❌ Phone authentication failed: {e}")
         logger.error(f"Phone authentication failed: {e}", exc_info=True)
@@ -133,16 +182,21 @@ async def authorize_telegram_client(
 
         if not success:
             await client.disconnect()
-            raise ConnectionError("Failed to authorize Telegram client")
+            raise ConnectionError("Failed to authorize Telegram client. Please check your credentials and try again.")
 
         print("✅ Authorization successful!")
         return client
 
+    except ConnectionError:
+        # Re-raise ConnectionError as-is (we may have raised it above)
+        if client.is_connected():
+            await client.disconnect()
+        raise
     except Exception as e:
         if client.is_connected():
             await client.disconnect()
-        logger.error(f"Authorization failed: {e}")
-        raise
+        logger.error(f"Authorization failed: {e}", exc_info=True)
+        raise ConnectionError(f"Failed to connect or authorize Telegram client: {e}") from e
 
 
 # TODO: add ability to specify session name and credentials from command line.
@@ -172,6 +226,7 @@ async def main():
     client = None
     try:
         client = await authorize_telegram_client(api_id, api_hash, session_name)
+        logger.info("Authorization successful!")
         print("✅ Authorization successful! You can now use other tools.")
     except Exception as e:
         print(f"❌ Authorization failed: {e}", file=sys.stderr)
