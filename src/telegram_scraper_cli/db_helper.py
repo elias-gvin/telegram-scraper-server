@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence, Tuple
-from astuple import astuple
+from dataclasses import astuple
 
 
 @dataclass(frozen=True)
@@ -13,6 +13,10 @@ class ChannelDbPaths:
     channel_dir: Path
     db_file: Path
     media_dir: Path
+
+
+class SchemaMismatchError(RuntimeError):
+    """Raised when an existing SQLite schema does not match what the app expects."""
 
 
 _DESIRED_COLS: Tuple[str, ...] = (
@@ -93,8 +97,7 @@ def ensure_messages_schema(conn: sqlite3.Connection) -> None:
     """
     Ensure `messages` table exists with the desired schema.
 
-    If schema changed, migrate by creating `messages_new`, copying available columns,
-    and swapping tables (SQLite cannot DROP COLUMN).
+    If the table exists but schema differs, raise SchemaMismatchError.
     """
     cur = conn.cursor()
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='messages'")
@@ -108,37 +111,15 @@ def ensure_messages_schema(conn: sqlite3.Connection) -> None:
 
         if set(existing_cols) != set(_DESIRED_COLS):
             existing_set = set(existing_cols)
-            insert_cols = [c for c in _DESIRED_COLS if c != "id"]
+            desired_set = set(_DESIRED_COLS)
+            missing = sorted(desired_set - existing_set)
+            extra = sorted(existing_set - desired_set)
 
-            def select_expr(col: str) -> str:
-                if col in existing_set:
-                    return col
-                if col == "is_forwarded":
-                    return "0 AS is_forwarded"
-                if col == "forwarded_from_channel_id":
-                    return "NULL AS forwarded_from_channel_id"
-                if col == "message":
-                    return "'' AS message"
-                return f"NULL AS {col}"
-
-            select_exprs = [select_expr(c) for c in insert_cols]
-
-            # Atomic table swap.
-            conn.execute("BEGIN")
-            try:
-                conn.execute(
-                    f"CREATE TABLE IF NOT EXISTS messages_new ({_DESIRED_COLUMNS_SQL})"
-                )
-                conn.execute(
-                    f"INSERT INTO messages_new ({', '.join(insert_cols)}) "
-                    f"SELECT {', '.join(select_exprs)} FROM messages"
-                )
-                conn.execute("DROP TABLE messages")
-                conn.execute("ALTER TABLE messages_new RENAME TO messages")
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
+            raise SchemaMismatchError(
+                "Existing SQLite schema for table 'messages' does not match expected schema. "
+                f"missing={missing or []}, extra={extra or []}. "
+                "Refusing to auto-migrate (no tables were modified)."
+            )
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_message_id ON messages(message_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_date ON messages(date)")
