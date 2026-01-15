@@ -45,6 +45,9 @@ class ScrapeParams:
     scrape_media: bool
     output_dir: Path
     replace_existing: bool = True
+    # If set, skip downloading media larger than this many megabytes.
+    # None means "no limit".
+    max_media_size_mb: Optional[float] = None
 
 MAX_CONCURRENT_DOWNLOADS = 5
 BATCH_SIZE = 100
@@ -169,11 +172,36 @@ class OptimizedTelegramScraper:
             return None
 
         try:
-            channel = self.scrape_params.channel[0]
             output_dir = Path(self.scrape_params.output_dir)
-            channel_dir = output_dir / channel
-            media_folder = channel_dir / 'media'
+            channel_id = self.scrape_params.channel[1]
+
+            # Put media next to the SQLite DB folder.
+            # In this project, the DB is stored under `<output_dir>/<channel_id>/<channel_id>.db`.
+            # Support both cases:
+            # - output_dir == parent folder (e.g. ./output)
+            # - output_dir == channel folder (e.g. ./output/-100123...)
+            db_dir = output_dir if output_dir.name == str(channel_id) else (output_dir / str(channel_id))
+
+            media_folder = db_dir / 'media'
             media_folder.mkdir(parents=True, exist_ok=True)
+
+            # Optional media size limit (best-effort; not all media has a known size up front).
+            if self.scrape_params.max_media_size_mb is not None:
+                try:
+                    max_bytes = int(float(self.scrape_params.max_media_size_mb) * 1024 * 1024)
+                except (TypeError, ValueError):
+                    max_bytes = None
+
+                if max_bytes is not None and max_bytes >= 0:
+                    msg_file = getattr(message, "file", None)
+                    size_bytes = getattr(msg_file, "size", None)
+                    if size_bytes is None:
+                        # Fallbacks for some media types.
+                        doc = getattr(getattr(message, "media", None), "document", None)
+                        size_bytes = getattr(doc, "size", None)
+
+                    if isinstance(size_bytes, int) and size_bytes > max_bytes:
+                        return None
             
             if isinstance(message.media, MessageMediaPhoto):
                 original_name = getattr(message.file, 'name', None) or "photo.jpg"
@@ -452,6 +480,8 @@ async def main() -> None:
     start_date = "2024-01-01"
     end_date = "2026-12-31"
     scrape_media = True
+    max_media_size_mb = 8 # 8MB
+    replace_existing = True
 
     db_connection = None
     
@@ -480,7 +510,9 @@ async def main() -> None:
             end_date=end_date,
             channel=(channel_name, channel_id),  # Tuple[str, int] - int is not used by scraper
             scrape_media=scrape_media,
-            output_dir=Path(output_dir)
+            output_dir=Path(output_dir),
+            replace_existing=replace_existing,
+            max_media_size_mb=max_media_size_mb,
         )
         
         # Create scraper instance
