@@ -4,9 +4,11 @@ import warnings
 import logging
 import sys
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Literal
 from pathlib import Path
 from datetime import datetime, timezone
+import json
+import traceback
 from telethon import TelegramClient
 from telethon.tl.types import (
     MessageMediaPhoto,
@@ -87,12 +89,20 @@ class OptimizedTelegramScraper:
         self.state_save_interval = STATE_SAVE_INTERVAL
         self.media_download_batch_size = MEDIA_DOWNLOAD_BATCH_SIZE
 
-    async def _download_media(self, message: Message) -> Optional[str]:
+    @dataclass(frozen=True)
+    class MediaDownloadResult:
+        status: Literal["downloaded", "skipped", "failed"]
+        path: Optional[str] = None
+        error_text: Optional[str] = None
+
+    async def _download_media(
+        self, message: Message
+    ) -> "OptimizedTelegramScraper.MediaDownloadResult":
         if not message.media or not self.scrape_params.scrape_media:
-            return None
+            return self.MediaDownloadResult(status="skipped")
 
         if isinstance(message.media, MessageMediaWebPage):
-            return None
+            return self.MediaDownloadResult(status="skipped")
 
         try:
             output_dir = Path(self.scrape_params.output_dir)
@@ -112,6 +122,14 @@ class OptimizedTelegramScraper:
             media_folder = db_dir / "media"
             media_folder.mkdir(parents=True, exist_ok=True)
 
+            # If file already exists from a previous run, treat as "downloaded" regardless
+            # of current size limit settings, and let caller ensure DB media_path is set.
+            existing_files = list(media_folder.glob(f"{message.id}-*"))
+            if existing_files:
+                return self.MediaDownloadResult(
+                    status="downloaded", path=str(existing_files[0])
+                )
+
             # Optional media size limit (best-effort; not all media has a known size up front).
             if self.scrape_params.max_media_size_mb is not None:
                 try:
@@ -130,7 +148,10 @@ class OptimizedTelegramScraper:
                         size_bytes = getattr(doc, "size", None)
 
                     if isinstance(size_bytes, int) and size_bytes > max_bytes:
-                        return None
+                        return self.MediaDownloadResult(
+                            status="skipped",
+                            error_text=f"skipped_by_size_limit bytes={size_bytes} max_bytes={max_bytes}",
+                        )
 
             if isinstance(message.media, MessageMediaPhoto):
                 original_name = getattr(message.file, "name", None) or "photo.jpg"
@@ -139,41 +160,53 @@ class OptimizedTelegramScraper:
                 ext = getattr(message.file, "ext", "bin") if message.file else "bin"
                 original_name = getattr(message.file, "name", None) or f"document.{ext}"
             else:
-                return None
+                return self.MediaDownloadResult(status="skipped")
 
             base_name = Path(original_name).stem
             extension = Path(original_name).suffix or f".{ext}"
             unique_filename = f"{message.id}-{base_name}{extension}"
             media_path = media_folder / unique_filename
 
-            existing_files = list(media_folder.glob(f"{message.id}-*"))
-            if existing_files:
-                return str(existing_files[0])
-
             for attempt in range(3):
                 try:
                     downloaded_path = await message.download_media(file=str(media_path))
                     if downloaded_path and Path(downloaded_path).exists():
-                        return downloaded_path
+                        return self.MediaDownloadResult(
+                            status="downloaded", path=downloaded_path
+                        )
                     else:
-                        return None
+                        return self.MediaDownloadResult(
+                            status="failed", error_text="download_returned_empty_path"
+                        )
                 except FloodWaitError as e:
                     if attempt < 2:
                         await asyncio.sleep(e.seconds)
                     else:
-                        return None
-                except Exception:
+                        return self.MediaDownloadResult(
+                            status="failed",
+                            error_text=f"FloodWaitError seconds={e.seconds}",
+                        )
+                except Exception as e:
                     if attempt < 2:
                         await asyncio.sleep(2**attempt)
                     else:
-                        return None
+                        return self.MediaDownloadResult(
+                            status="failed",
+                            error_text=f"{type(e).__name__}: {e}",
+                        )
 
-            return None
-        except Exception:
-            return None
+            return self.MediaDownloadResult(
+                status="failed", error_text="download_exhausted_retries"
+            )
+        except Exception as e:
+            return self.MediaDownloadResult(
+                status="failed", error_text=f"{type(e).__name__}: {e}"
+            )
 
     async def scrape_channel(self) -> None:
-        is_connected_and_authorized = self.client.is_connected() and await self.client.is_user_authorized()
+        is_connected_and_authorized = (
+            self.client.is_connected() and await self.client.is_user_authorized()
+        )
         if not is_connected_and_authorized:
             raise ConnectionError(
                 "Telegram client is not connected or not authorized. Please reconnect."
@@ -183,10 +216,59 @@ class OptimizedTelegramScraper:
             raise ConnectionError("Database connection is not alive. Please reconnect.")
 
         # Initialize database schema | populates schema if it doesn't exist
-        db_helper.ensure_messages_schema(self.db_connection)
+        db_helper.ensure_schema(self.db_connection)
+
+        channel_id = self.scrape_params.channel[1]
+        channel_name = self.scrape_params.channel[0]
+
+        # Metadata: channel + scrape run (default unsuccessful)
+        run_id: Optional[int] = None
+        media_failed_count = 0
+        media_skipped_count = 0
+        media_successful_count = 0
+        error_text: Optional[str] = None
+        scrape_ok = False
 
         try:
-            channel = self.scrape_params.channel[1]
+            me = await self.client.get_me()
+            user_str = None
+            if me is not None:
+                username = getattr(me, "username", None)
+                if username:
+                    user_str = f"@{username}"
+                else:
+                    user_str = str(getattr(me, "id", "")) or None
+        except Exception:
+            user_str = None
+
+        db_helper.upsert_channel(
+            self.db_connection,
+            channel_id=channel_id,
+            channel_name=channel_name,
+            user=user_str,
+        )
+        params_json = json.dumps(
+            {
+                "channel_id": channel_id,
+                "channel_name": channel_name,
+                "start_date": self.scrape_params.start_date,
+                "end_date": self.scrape_params.end_date,
+                "scrape_media": self.scrape_params.scrape_media,
+                "replace_existing": self.scrape_params.replace_existing,
+                "max_media_size_mb": self.scrape_params.max_media_size_mb,
+                "output_dir": str(self.scrape_params.output_dir),
+                "max_concurrent_downloads": self.max_concurrent_downloads,
+                "batch_size": self.batch_size,
+                "media_download_batch_size": self.media_download_batch_size,
+            },
+            ensure_ascii=False,
+        )
+        run_id = db_helper.create_scrape_run(
+            self.db_connection, params_json=params_json, triggered_by_user=user_str
+        )
+
+        try:
+            channel = channel_id
             logger.error(f"!!! Scraping channel {channel}")
             entity = await self.client.get_entity(
                 int(channel)
@@ -319,7 +401,9 @@ class OptimizedTelegramScraper:
                     if len(message_batch) >= self.batch_size:
                         db_helper.batch_upsert_messages(
                             self.db_connection,
-                            messages,
+                            message_batch,
+                            channel_id=channel_id,
+                            run_id=run_id,
                             replace_existing=self.scrape_params.replace_existing,
                         )
                         message_batch.clear()
@@ -332,13 +416,14 @@ class OptimizedTelegramScraper:
             if message_batch:
                 db_helper.batch_upsert_messages(
                     self.db_connection,
-                    messages,
+                    message_batch,
+                    channel_id=channel_id,
+                    run_id=run_id,
                     replace_existing=self.scrape_params.replace_existing,
                 )
 
             if media_tasks:
                 total_media = len(media_tasks)
-                successful_downloads = 0
                 logger.info(f"Downloading {total_media} media files...")
 
                 semaphore = asyncio.Semaphore(self.max_concurrent_downloads)
@@ -356,29 +441,61 @@ class OptimizedTelegramScraper:
                         ]
 
                         for j, task in enumerate(tasks):
+                            msg = batch[j]
                             try:
-                                media_path = await task
-                                if media_path:
+                                result = await task
+                                if result.status == "downloaded" and result.path:
                                     db_helper.set_message_media_path(
                                         self.db_connection,
-                                        message_id=message_id,
-                                        media_path=media_path,
+                                        message_id=msg.id,
+                                        media_path=result.path,
                                     )
-                                    successful_downloads += 1
+                                    media_successful_count += 1
+                                elif result.status == "failed":
+                                    media_failed_count += 1
+                                    if result.error_text:
+                                        # keep error_text reasonably sized
+                                        if error_text is None:
+                                            error_text = ""
+                                        if len(error_text) < 20_000:
+                                            error_text += f"\nmedia message_id={msg.id}: {result.error_text}"
+                                else:
+                                    media_skipped_count += 1
                             except Exception:
-                                pass
+                                media_failed_count += 1
 
                             pbar.update(1)
 
                 logger.info(
-                    f"Media download complete! ({successful_downloads}/{total_media} successful)"
+                    f"Media download complete! ({media_successful_count}/{total_media} successful)"
                 )
 
             logger.info(f"Completed scraping channel {channel}")
+            scrape_ok = True
 
         except Exception as e:
             logger.error(f"Error with channel {channel}: {e}", exc_info=True)
+            if error_text is None:
+                error_text = "".join(
+                    traceback.format_exception(type(e), e, e.__traceback__)
+                )
+            raise
+        finally:
+            if run_id is not None:
+                # If there were media download failures, treat the whole scrape as unsuccessful.
+                successful = bool(scrape_ok and media_failed_count == 0)
+                if media_failed_count and not error_text:
+                    error_text = f"media_failed_count={media_failed_count}"
 
+                db_helper.finalize_scrape_run(
+                    self.db_connection,
+                    run_id=run_id,
+                    successful=successful,
+                    media_successful_count=media_successful_count,
+                    media_failed_count=media_failed_count,
+                    media_skipped_count=media_skipped_count,
+                    error_text=error_text,
+                )
 
 
 async def main() -> None:
