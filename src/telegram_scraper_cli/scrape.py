@@ -34,9 +34,8 @@ class MessageData:
     media_path: Optional[str]
     reply_to: Optional[int]
     post_author: Optional[str]
-    views: Optional[int]
-    forwards: Optional[int]
-    reactions: Optional[str]
+    is_forwarded: int
+    forwarded_from_channel_id: Optional[int]
 
 @dataclass
 class ScrapeParams:
@@ -45,6 +44,7 @@ class ScrapeParams:
     channel: Tuple[str, str]
     scrape_media: bool
     output_dir: Path
+    replace_existing: bool = True
 
 MAX_CONCURRENT_DOWNLOADS = 5
 BATCH_SIZE = 100
@@ -78,13 +78,85 @@ class OptimizedTelegramScraper:
             return False
 
     def populate_db_schema(self) -> None:
-        self.db_connection.execute('''CREATE TABLE IF NOT EXISTS messages
-                           (id INTEGER PRIMARY KEY, message_id INTEGER UNIQUE, date TEXT,
-                            sender_id INTEGER, first_name TEXT, last_name TEXT, username TEXT,
-                            message TEXT, media_type TEXT, media_path TEXT, reply_to INTEGER,
-                            post_author TEXT, views INTEGER, forwards INTEGER, reactions TEXT)''')
-        self.db_connection.execute('CREATE INDEX IF NOT EXISTS idx_message_id ON messages(message_id)')
-        self.db_connection.execute('CREATE INDEX IF NOT EXISTS idx_date ON messages(date)')
+        desired_columns_sql = (
+            "id INTEGER PRIMARY KEY, "
+            "message_id INTEGER UNIQUE, "
+            "date TEXT, "
+            "sender_id INTEGER, "
+            "first_name TEXT, "
+            "last_name TEXT, "
+            "username TEXT, "
+            "message TEXT, "
+            "media_type TEXT, "
+            "media_path TEXT, "
+            "reply_to INTEGER, "
+            "post_author TEXT, "
+            "is_forwarded INTEGER, "
+            "forwarded_from_channel_id INTEGER"
+        )
+
+        # If schema changed, migrate existing DB by recreating the table (SQLite can't DROP COLUMN).
+        cur = self.db_connection.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='messages'")
+        table_exists = cur.fetchone() is not None
+
+        if not table_exists:
+            self.db_connection.execute(f"CREATE TABLE IF NOT EXISTS messages ({desired_columns_sql})")
+        else:
+            cur.execute("PRAGMA table_info(messages)")
+            existing_cols = [row[1] for row in cur.fetchall()]
+            desired_cols = [
+                "id",
+                "message_id",
+                "date",
+                "sender_id",
+                "first_name",
+                "last_name",
+                "username",
+                "message",
+                "media_type",
+                "media_path",
+                "reply_to",
+                "post_author",
+                "is_forwarded",
+                "forwarded_from_channel_id",
+            ]
+
+            if set(existing_cols) != set(desired_cols):
+                self.db_connection.execute("BEGIN")
+                try:
+                    self.db_connection.execute(f"CREATE TABLE IF NOT EXISTS messages_new ({desired_columns_sql})")
+
+                    # Copy over what we can; fill new columns with defaults.
+                    existing_set = set(existing_cols)
+                    insert_cols = [c for c in desired_cols if c != "id"]
+
+                    def select_expr(col: str) -> str:
+                        if col in existing_set:
+                            return col
+                        if col == "is_forwarded":
+                            return "0 AS is_forwarded"
+                        if col == "forwarded_from_channel_id":
+                            return "NULL AS forwarded_from_channel_id"
+                        if col == "message":
+                            return "'' AS message"
+                        return f"NULL AS {col}"
+
+                    select_exprs = [select_expr(c) for c in insert_cols]
+                    self.db_connection.execute(
+                        f"INSERT INTO messages_new ({', '.join(insert_cols)}) "
+                        f"SELECT {', '.join(select_exprs)} FROM messages"
+                    )
+
+                    self.db_connection.execute("DROP TABLE messages")
+                    self.db_connection.execute("ALTER TABLE messages_new RENAME TO messages")
+                    self.db_connection.execute("COMMIT")
+                except Exception:
+                    self.db_connection.execute("ROLLBACK")
+                    raise
+
+        self.db_connection.execute("CREATE INDEX IF NOT EXISTS idx_message_id ON messages(message_id)")
+        self.db_connection.execute("CREATE INDEX IF NOT EXISTS idx_date ON messages(date)")
         self.db_connection.execute('PRAGMA journal_mode=WAL')
         self.db_connection.execute('PRAGMA synchronous=NORMAL')
         self.db_connection.commit()
@@ -221,16 +293,16 @@ class OptimizedTelegramScraper:
 
                     sender = await message.get_sender()
 
-                    reactions_str = None
-                    if message.reactions and message.reactions.results:
-                        reactions_parts = []
-                        for reaction in message.reactions.results:
-                            emoji = getattr(reaction.reaction, 'emoticon', '')
-                            count = reaction.count
-                            if emoji:
-                                reactions_parts.append(f"{emoji} {count}")
-                        if reactions_parts:
-                            reactions_str = ' '.join(reactions_parts)
+                    fwd_from = getattr(message, "fwd_from", None)
+                    is_forwarded = 1 if fwd_from else 0
+                    forwarded_from_channel_id = None
+                    if fwd_from:
+                        # Prefer `from_id`, fallback to `saved_from_peer` (some forwards hide origin).
+                        peer = getattr(fwd_from, "from_id", None) or getattr(fwd_from, "saved_from_peer", None)
+                        if isinstance(peer, PeerChannel):
+                            forwarded_from_channel_id = peer.channel_id
+                        else:
+                            forwarded_from_channel_id = getattr(peer, "channel_id", None)
 
                     msg_data = MessageData(
                         message_id=message.id,
@@ -244,9 +316,8 @@ class OptimizedTelegramScraper:
                         media_path=None,
                         reply_to=message.reply_to_msg_id if message.reply_to else None,
                         post_author=message.post_author,
-                        views=message.views,
-                        forwards=message.forwards,
-                        reactions=reactions_str
+                        is_forwarded=is_forwarded,
+                        forwarded_from_channel_id=forwarded_from_channel_id,
                     )
 
                     message_batch.append(msg_data)
@@ -305,16 +376,55 @@ class OptimizedTelegramScraper:
         if not self._check_db_connection():
             raise ConnectionError("Database connection is not alive. Cannot insert messages.")
 
-        data = [(msg.message_id, msg.date, msg.sender_id, msg.first_name,
-                msg.last_name, msg.username, msg.message, msg.media_type,
-                msg.media_path, msg.reply_to, msg.post_author, msg.views,
-                msg.forwards, msg.reactions) for msg in messages]
+        data = [(
+            msg.message_id,
+            msg.date,
+            msg.sender_id,
+            msg.first_name,
+            msg.last_name,
+            msg.username,
+            msg.message,
+            msg.media_type,
+            msg.media_path,
+            msg.reply_to,
+            msg.post_author,
+            msg.is_forwarded,
+            msg.forwarded_from_channel_id,
+        ) for msg in messages]
 
-        self.db_connection.executemany('''INSERT OR IGNORE INTO messages
-                           (message_id, date, sender_id, first_name, last_name, username,
-                            message, media_type, media_path, reply_to, post_author, views,
-                            forwards, reactions)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', data)
+        if self.scrape_params.replace_existing:
+            # Update existing rows keyed by message_id (reruns can refresh content/metadata).
+            self.db_connection.executemany(
+                '''INSERT INTO messages
+                   (message_id, date, sender_id, first_name, last_name, username,
+                    message, media_type, media_path, reply_to, post_author,
+                    is_forwarded, forwarded_from_channel_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(message_id) DO UPDATE SET
+                    date=excluded.date,
+                    sender_id=excluded.sender_id,
+                    first_name=excluded.first_name,
+                    last_name=excluded.last_name,
+                    username=excluded.username,
+                    message=excluded.message,
+                    media_type=excluded.media_type,
+                    media_path=excluded.media_path,
+                    reply_to=excluded.reply_to,
+                    post_author=excluded.post_author,
+                    is_forwarded=excluded.is_forwarded,
+                    forwarded_from_channel_id=excluded.forwarded_from_channel_id
+                ''',
+                data,
+            )
+        else:
+            self.db_connection.executemany(
+                '''INSERT OR IGNORE INTO messages
+                   (message_id, date, sender_id, first_name, last_name, username,
+                    message, media_type, media_path, reply_to, post_author,
+                    is_forwarded, forwarded_from_channel_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                data,
+            )
         self.db_connection.commit()
 
 
