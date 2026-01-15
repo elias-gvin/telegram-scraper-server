@@ -31,3 +31,7 @@ mb combine every tool in 1 single pipeline (like it was with original tool)?
 AAAAA
 Add table which catches the last successfull data dump
 Add param which downloads everything AFTER the latest successfull data dump
+Limit megabytes of downloaded files
+Ensure that reposts are seen as repostsbe
+Make paths better (right now - output paths are a mess)
+Improbe db structure

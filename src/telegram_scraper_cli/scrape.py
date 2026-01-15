@@ -157,7 +157,7 @@ class OptimizedTelegramScraper:
         try:
             channel = self.scrape_params.channel[1]
             logger.error(f"!!! Scraping channel {channel} with name {self.scrape_params.channel[0]}")
-            entity = await self.client.get_entity(-5263097314) # TODO: remove hardcoded channel id
+            entity = await self.client.get_entity(int(channel)) # TODO: remove hardcoded channel id
 
             # Telethon expects datetime (or None) for offset_date, not a string.
             start_date_dt = None
