@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
+import csv
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 from datetime import datetime, timezone
-import json
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,8 @@ _SCRAPE_RUNS_COLS: Tuple[str, ...] = (
     "finished_at",
 )
 
+_ALLOWED_MESSAGES_ORDER_BY: frozenset[str] = frozenset({"date", "message_id", "id"})
+
 
 def channel_db_paths(output_dir: Path, channel_id: str) -> ChannelDbPaths:
     """
@@ -107,6 +110,21 @@ def open_channel_db(
     return conn
 
 
+def open_db_file(db_file: Path, *, row_factory: bool = True) -> sqlite3.Connection:
+    """
+    Open an existing SQLite DB file (generic helper).
+
+    This is intentionally separate from `open_channel_db()` because it doesn't assume
+    any on-disk layout and is useful for tooling like exports.
+    """
+    conn = sqlite3.connect(str(db_file))
+    if row_factory:
+        conn.row_factory = sqlite3.Row
+    # Keep behavior consistent with the rest of the app.
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
 def configure_connection(conn: sqlite3.Connection) -> None:
     """Apply SQLite pragmas for better ingest performance and concurrency."""
     conn.execute("PRAGMA journal_mode=WAL")
@@ -114,7 +132,7 @@ def configure_connection(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys=ON")
 
 
-def ensure_messages_schema(conn: sqlite3.Connection) -> None:
+def ensure_messages_schema(conn: sqlite3.Connection, *, create_missing_tables: bool = True) -> None:
     """
     Ensure `messages` table exists with the desired schema.
 
@@ -125,6 +143,10 @@ def ensure_messages_schema(conn: sqlite3.Connection) -> None:
     table_exists = cur.fetchone() is not None
 
     if not table_exists:
+        if not create_missing_tables:
+            raise SchemaMismatchError(
+                "Missing required table 'messages' (refusing to create tables in validate-only mode)."
+            )
         conn.execute(f"CREATE TABLE IF NOT EXISTS messages ({_DESIRED_COLUMNS_SQL})")
     else:
         cur.execute("PRAGMA table_info(messages)")
@@ -150,7 +172,7 @@ def ensure_messages_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def ensure_metadata_schema(conn: sqlite3.Connection) -> None:
+def ensure_metadata_schema(conn: sqlite3.Connection, *, create_missing_tables: bool = True) -> None:
     """
     Ensure metadata tables exist:
       - channels
@@ -164,6 +186,10 @@ def ensure_metadata_schema(conn: sqlite3.Connection) -> None:
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='channels'")
     channels_exists = cur.fetchone() is not None
     if not channels_exists:
+        if not create_missing_tables:
+            raise SchemaMismatchError(
+                "Missing required table 'channels' (refusing to create tables in validate-only mode)."
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS channels (
@@ -188,6 +214,10 @@ def ensure_metadata_schema(conn: sqlite3.Connection) -> None:
     )
     runs_exists = cur.fetchone() is not None
     if not runs_exists:
+        if not create_missing_tables:
+            raise SchemaMismatchError(
+                "Missing required table 'scrape_runs' (refusing to create tables in validate-only mode)."
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS scrape_runs (
@@ -219,10 +249,106 @@ def ensure_metadata_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
-    """Ensure all tables required by the app exist."""
-    ensure_metadata_schema(conn)
-    ensure_messages_schema(conn)
+def ensure_schema(conn: sqlite3.Connection, *, create_missing_tables: bool = True) -> None:
+    """Ensure (or validate) all tables required by the app exist."""
+    ensure_metadata_schema(conn, create_missing_tables=create_missing_tables)
+    ensure_messages_schema(conn, create_missing_tables=create_missing_tables)
+
+
+def _export_messages_to_csv(
+    *,
+    cursor: sqlite3.Cursor,
+    output_file: Path,
+    columns: Sequence[str],
+    batch_size: int,
+) -> int:
+    row_count = 0
+    with open(output_file, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(list(columns))
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+            writer.writerows([tuple(row) for row in rows])
+            row_count += len(rows)
+    return row_count
+
+
+def _export_messages_to_json(
+    *,
+    cursor: sqlite3.Cursor,
+    output_file: Path,
+    batch_size: int,
+    json_indent: Optional[int],
+) -> int:
+    row_count = 0
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write("[\n")
+        first = True
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+            for row in rows:
+                if not first:
+                    f.write(",\n")
+                else:
+                    first = False
+                # With `open_db_file(..., row_factory=True)`, rows are sqlite3.Row
+                json.dump(dict(row), f, ensure_ascii=False, indent=json_indent)
+                row_count += 1
+        f.write("\n]\n")
+    return row_count
+
+
+def export_messages(
+    conn: sqlite3.Connection,
+    *,
+    output_file: Path,
+    export_format: str,
+    order_by: str = "date",
+    json_indent: Optional[int] = 2,
+    batch_size: int = 1000,
+    validate_only: bool = True,
+) -> int:
+    """
+    Export `messages` table to a file.
+
+    Args:
+        conn: sqlite connection (recommended to be opened with row_factory=True for JSON export).
+        output_file: where to write.
+        export_format: "csv" or "json".
+        order_by: one of {"date","message_id","id"} (allowlist to avoid SQL injection).
+        validate_only: if True, refuses to create missing tables (export should fail fast).
+
+    Returns:
+        Row count written.
+    """
+    if export_format not in ("csv", "json"):
+        raise ValueError("export_format must be 'csv' or 'json'")
+
+    ensure_schema(conn, create_missing_tables=not validate_only)
+
+    if order_by not in _ALLOWED_MESSAGES_ORDER_BY:
+        raise ValueError(f"order_by must be one of {sorted(_ALLOWED_MESSAGES_ORDER_BY)}")
+
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT * FROM messages ORDER BY {order_by}")
+    columns = [desc[0] for desc in cursor.description]
+
+    if export_format == "csv":
+        return _export_messages_to_csv(
+            cursor=cursor, output_file=output_file, columns=columns, batch_size=batch_size
+        )
+
+    # JSON export expects row-like objects to be convertible to dict()
+    return _export_messages_to_json(
+        cursor=cursor,
+        output_file=output_file,
+        batch_size=batch_size,
+        json_indent=json_indent,
+    )
 
 
 def upsert_channel(
