@@ -38,10 +38,7 @@ def _configure_logging(log_level: str) -> None:
 
 
 def _load_telegram_creds(
-    *,
-    api_id: Optional[str],
-    api_hash: Optional[str],
-    session_name: Optional[str]
+    *, api_id: Optional[str], api_hash: Optional[str], session_name: Optional[str]
 ) -> tuple[int, str, str]:
     api_id_val = api_id or os.getenv("TELEGRAM_API_ID")
     api_hash_val = api_hash or os.getenv("TELEGRAM_API_HASH")
@@ -157,8 +154,16 @@ def search_cmd(
     default=Path("./output"),
     show_default=True,
 )
-@click.option("--start-date", default=None, help="format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS. If ommited, all messages from the beginning of the channel will be scraped.")
-@click.option("--end-date", default=None, help="format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS. If ommited, all messages until the current date will be scraped.")
+@click.option(
+    "--start-date",
+    default=None,
+    help="format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS. If ommited, all messages from the beginning of the channel will be scraped.",
+)
+@click.option(
+    "--end-date",
+    default=None,
+    help="format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS. If ommited, all messages until the current date will be scraped.",
+)
 @click.option("--media/--no-media", default=True, show_default=True)
 @click.option(
     "--max-media-size-mb",
@@ -175,18 +180,16 @@ def scrape_cmd(
     start_date: Optional[str],
     end_date: Optional[str],
     media: bool,
-    max_media_size_mb: Optional[float]
+    max_media_size_mb: Optional[float],
 ) -> None:
     load_dotenv()
 
     # Pre-configured parameters
     replace_existing = True
-    
+
     async def _run() -> None:
         api_id_int, api_hash_val, session_val = _load_telegram_creds(
-            api_id=api_id,
-            api_hash=api_hash,
-            session_name=session_name
+            api_id=api_id, api_hash=api_hash, session_name=session_name
         )
         client = await authorize_telegram_client(api_id_int, api_hash_val, session_val)
 
@@ -220,7 +223,8 @@ def scrape_cmd(
 
 
 @main.command(
-    "export", help="Export chat history from SQLite DB(s) with scraped messages to CSV/JSON."
+    "export",
+    help="Export chat history from SQLite DB(s) with scraped messages to CSV/JSON.",
 )
 @click.option(
     "--output-dir",
@@ -243,9 +247,7 @@ def scrape_cmd(
     help="Channel id to export. May be specified multiple times. If omitted, exports all channels found in output-dir.",
 )
 def export_cmd(
-    output_dir: Path,
-    export_format: str,
-    channel_ids: Sequence[str]
+    output_dir: Path, export_format: str, channel_ids: Sequence[str]
 ) -> None:
     load_dotenv()
 

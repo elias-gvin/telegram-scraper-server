@@ -365,7 +365,11 @@ def export_messages(
 
 
 def upsert_channel(
-    conn: sqlite3.Connection, *, channel_id: str | int, channel_name: str, user: str | None
+    conn: sqlite3.Connection,
+    *,
+    channel_id: str | int,
+    channel_name: str,
+    user: str | None,
 ) -> None:
     conn.execute(
         """
