@@ -17,11 +17,6 @@ from . import db_helper
 
 
 class _OrderedGroup(click.Group):
-    """
-    Click lists commands alphabetically by default.
-    Override ordering so `tgsc --help` follows the typical workflow.
-    """
-
     _preferred_order = ("search", "scrape", "export")
 
     def list_commands(self, ctx: click.Context) -> list[str]:
@@ -155,12 +150,10 @@ def search_cmd(
     "--session-name", default=None, help="Overrides TELEGRAM_SESSION_NAME env var."
 )
 @click.option(
-    "--channel-id", required=True, help="Numeric channel/chat id (e.g. -5263097314)."
-)
-@click.option(
-    "--channel-name",
-    default=None,
-    help="Optional display name; will be auto-resolved if omitted.",
+    "--channel-id",
+    required=True,
+    type=int,
+    help="Numeric channel/chat id (e.g. -5263097314).",
 )
 @click.option(
     "--output-dir",
@@ -185,8 +178,7 @@ def scrape_cmd(
     api_id: Optional[str],
     api_hash: Optional[str],
     session_name: Optional[str],
-    channel_id: str,
-    channel_name: Optional[str],
+    channel_id: int,
     output_dir: Path,
     start_date: Optional[str],
     end_date: Optional[str],
@@ -210,18 +202,10 @@ def scrape_cmd(
                 output_dir=output_dir, channel_id=channel_id, check_same_thread=False
             )
 
-            resolved_name = channel_name
-            if not resolved_name:
-                try:
-                    entity = await client.get_entity(int(channel_id))
-                    resolved_name = getattr(entity, "title", None) or channel_id
-                except Exception:
-                    resolved_name = channel_id
-
             scrape_params = scrape_mod.ScrapeParams(
                 start_date=start_date,
                 end_date=end_date,
-                channel=(resolved_name, channel_id),
+                channel_id=channel_id,
                 scrape_media=media,
                 output_dir=output_dir,
                 replace_existing=replace_existing,

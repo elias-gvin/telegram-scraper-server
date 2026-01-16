@@ -58,7 +58,7 @@ class MessageData:
 class ScrapeParams:
     start_date: Optional[str]
     end_date: Optional[str]
-    channel: Tuple[str, str]
+    channel_id: int
     scrape_media: bool
     output_dir: Path
     replace_existing: bool = True
@@ -106,7 +106,7 @@ class OptimizedTelegramScraper:
 
         try:
             output_dir = Path(self.scrape_params.output_dir)
-            channel_id = self.scrape_params.channel[1]
+            channel_id = self.scrape_params.channel_id
 
             # Put media next to the SQLite DB folder.
             # In this project, the DB is stored under `<output_dir>/<channel_id>/<channel_id>.db`.
@@ -218,8 +218,13 @@ class OptimizedTelegramScraper:
         # Initialize database schema | populates schema if it doesn't exist
         db_helper.ensure_schema(self.db_connection)
 
-        channel_id = self.scrape_params.channel[1]
-        channel_name = self.scrape_params.channel[0]
+        channel_id = self.scrape_params.channel_id
+        # Resolve display title from Telegram at runtime (do not store it in params).
+        try:
+            entity = await self.client.get_entity(int(channel_id))
+            channel_name = getattr(entity, "title", None) or str(channel_id)
+        except Exception:
+            channel_name = str(channel_id)
 
         # Metadata: channel + scrape run (default unsuccessful)
         run_id: Optional[int] = None
@@ -243,13 +248,13 @@ class OptimizedTelegramScraper:
 
         db_helper.upsert_channel(
             self.db_connection,
-            channel_id=channel_id,
+            channel_id=str(channel_id),
             channel_name=channel_name,
             user=user_str,
         )
         params_json = json.dumps(
             {
-                "channel_id": channel_id,
+                "channel_id": str(channel_id),
                 "channel_name": channel_name,
                 "start_date": self.scrape_params.start_date,
                 "end_date": self.scrape_params.end_date,

@@ -134,4 +134,4 @@ def export_chat_history(
 
 
 if __name__ == "__main__":
-    main()
+    pass

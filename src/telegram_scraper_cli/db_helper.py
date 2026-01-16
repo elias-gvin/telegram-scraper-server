@@ -77,7 +77,7 @@ _SCRAPE_RUNS_COLS: Tuple[str, ...] = (
 _ALLOWED_MESSAGES_ORDER_BY: frozenset[str] = frozenset({"date", "message_id", "id"})
 
 
-def channel_db_paths(output_dir: Path, channel_id: str) -> ChannelDbPaths:
+def channel_db_paths(output_dir: Path, channel_id: str | int) -> ChannelDbPaths:
     """
     Compute canonical on-disk paths for a channel's DB and media.
 
@@ -95,7 +95,7 @@ def channel_db_paths(output_dir: Path, channel_id: str) -> ChannelDbPaths:
 def open_channel_db(
     *,
     output_dir: Path,
-    channel_id: str,
+    channel_id: str | int,
     check_same_thread: bool = False,
 ) -> sqlite3.Connection:
     """
@@ -365,7 +365,7 @@ def export_messages(
 
 
 def upsert_channel(
-    conn: sqlite3.Connection, *, channel_id: str, channel_name: str, user: str | None
+    conn: sqlite3.Connection, *, channel_id: str | int, channel_name: str, user: str | None
 ) -> None:
     conn.execute(
         """
@@ -437,7 +437,7 @@ def batch_upsert_messages(
     conn: sqlite3.Connection,
     messages: Sequence[object],
     *,
-    channel_id: str,
+    channel_id: str | int,
     run_id: int,
     replace_existing: bool,
 ) -> None:
