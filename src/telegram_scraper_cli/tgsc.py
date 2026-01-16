@@ -15,6 +15,8 @@ from . import search as search_mod
 from .auth import authorize_telegram_client
 from . import db_helper
 
+logger = logging.getLogger(__name__)
+
 
 class _OrderedGroup(click.Group):
     _preferred_order = ("search", "scrape", "export")
@@ -39,14 +41,8 @@ def _load_telegram_creds(
     *,
     api_id: Optional[str],
     api_hash: Optional[str],
-    session_name: Optional[str],
-    env_file: Optional[str],
+    session_name: Optional[str]
 ) -> tuple[int, str, str]:
-    if env_file:
-        load_dotenv(env_file)
-    else:
-        load_dotenv()
-
     api_id_val = api_id or os.getenv("TELEGRAM_API_ID")
     api_hash_val = api_hash or os.getenv("TELEGRAM_API_HASH")
     session_val = session_name or os.getenv("TELEGRAM_SESSION_NAME", "session")
@@ -65,7 +61,14 @@ def _load_telegram_creds(
 
 @click.group(
     cls=_OrderedGroup,
-    help="Telegram Scraper CLI (tgsc). Usually, sequence of commands is: search (to get channel id), scrape (to scrape messages), export (to export messages to CSV/JSON).",
+    help=(
+        "Telegram Scraper CLI (tgsc).\n"
+        "\n"
+        "Usually, sequence of commands is:\n"
+        "search (to get channel id)\n"
+        "-> scrape (to scrape messages by channel id)\n"
+        "-> export (to export messages from scraped data to CSV/JSON)\n"
+    ),
 )
 @click.option("--log-level", default="INFO", show_default=True)
 def main(log_level: str) -> None:
@@ -74,17 +77,11 @@ def main(log_level: str) -> None:
 
 @main.command("search", help="Search your dialogs (channels + groups).")
 @click.argument("query", type=str)
-@click.option(
-    "--env-file", type=click.Path(path_type=Path, dir_okay=False), default=None
-)
 @click.option("--api-id", default=None, help="Overrides TELEGRAM_API_ID env var.")
 @click.option("--api-hash", default=None, help="Overrides TELEGRAM_API_HASH env var.")
 @click.option(
     "--session-name", default=None, help="Overrides TELEGRAM_SESSION_NAME env var."
 )
-@click.option("--by-id/--no-by-id", default=True, show_default=True)
-@click.option("--by-username/--no-by-username", default=True, show_default=True)
-@click.option("--by-title/--no-by-title", default=True, show_default=True)
 @click.option(
     "--title-threshold",
     default=80,
@@ -94,21 +91,23 @@ def main(log_level: str) -> None:
 )
 def search_cmd(
     query: str,
-    env_file: Optional[Path],
     api_id: Optional[str],
     api_hash: Optional[str],
     session_name: Optional[str],
-    by_id: bool,
-    by_username: bool,
-    by_title: bool,
     title_threshold: int,
 ) -> None:
+    load_dotenv()
+
+    # Pre-configured parameters
+    by_username = True
+    by_id = True
+    by_title = True
+
     async def _run() -> None:
         api_id_int, api_hash_val, session_val = _load_telegram_creds(
             api_id=api_id,
             api_hash=api_hash,
             session_name=session_name,
-            env_file=str(env_file) if env_file else None,
         )
         client = await authorize_telegram_client(api_id_int, api_hash_val, session_val)
         try:
@@ -141,9 +140,6 @@ def search_cmd(
     "scrape",
     help="Scrape messages (and optional media) from a channel/group into SQLite.",
 )
-@click.option(
-    "--env-file", type=click.Path(path_type=Path, dir_okay=False), default=None
-)
 @click.option("--api-id", default=None, help="Overrides TELEGRAM_API_ID env var.")
 @click.option("--api-hash", default=None, help="Overrides TELEGRAM_API_HASH env var.")
 @click.option(
@@ -161,8 +157,8 @@ def search_cmd(
     default=Path("./output"),
     show_default=True,
 )
-@click.option("--start-date", default=None, help="YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")
-@click.option("--end-date", default=None, help="YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")
+@click.option("--start-date", default=None, help="format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS. If ommited, all messages from the beginning of the channel will be scraped.")
+@click.option("--end-date", default=None, help="format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS. If ommited, all messages until the current date will be scraped.")
 @click.option("--media/--no-media", default=True, show_default=True)
 @click.option(
     "--max-media-size-mb",
@@ -170,11 +166,7 @@ def search_cmd(
     type=float,
     help="Skip downloading media larger than this size.",
 )
-@click.option(
-    "--replace-existing/--no-replace-existing", default=True, show_default=True
-)
 def scrape_cmd(
-    env_file: Optional[Path],
     api_id: Optional[str],
     api_hash: Optional[str],
     session_name: Optional[str],
@@ -183,15 +175,18 @@ def scrape_cmd(
     start_date: Optional[str],
     end_date: Optional[str],
     media: bool,
-    max_media_size_mb: Optional[float],
-    replace_existing: bool,
+    max_media_size_mb: Optional[float]
 ) -> None:
+    load_dotenv()
+
+    # Pre-configured parameters
+    replace_existing = True
+    
     async def _run() -> None:
         api_id_int, api_hash_val, session_val = _load_telegram_creds(
             api_id=api_id,
             api_hash=api_hash,
-            session_name=session_name,
-            env_file=str(env_file) if env_file else None,
+            session_name=session_name
         )
         client = await authorize_telegram_client(api_id_int, api_hash_val, session_val)
 
@@ -225,7 +220,7 @@ def scrape_cmd(
 
 
 @main.command(
-    "export", help="Export chat history from per-channel SQLite DB(s) to CSV/JSON."
+    "export", help="Export chat history from SQLite DB(s) with scraped messages to CSV/JSON."
 )
 @click.option(
     "--output-dir",
@@ -247,41 +242,37 @@ def scrape_cmd(
     multiple=True,
     help="Channel id to export. May be specified multiple times. If omitted, exports all channels found in output-dir.",
 )
-@click.option(
-    "--out-dir",
-    type=click.Path(path_type=Path, file_okay=False, dir_okay=True),
-    default=None,
-    help="Where to write exported files (default: next to each channel DB).",
-)
-@click.option("--order-by", default="date", show_default=True)
-@click.option("--batch-size", default=1000, show_default=True, type=int)
-@click.option("--json-indent", default=2, show_default=True, type=int)
-@click.option(
-    "--no-json-indent",
-    is_flag=True,
-    default=False,
-    help="Write compact JSON (indent=None).",
-)
 def export_cmd(
     output_dir: Path,
     export_format: str,
-    channel_ids: Sequence[str],
-    out_dir: Optional[Path],
-    order_by: str,
-    batch_size: int,
-    json_indent: int,
-    no_json_indent: bool,
+    channel_ids: Sequence[str]
 ) -> None:
-    indent = None if no_json_indent else json_indent
-    results = export_mod.export_chat_history(
-        output_dir=output_dir,
-        export_format=export_format.lower(),  # type: ignore[arg-type]
-        channel_ids=list(channel_ids) if channel_ids else None,
-        out_dir=out_dir,
-        order_by=order_by,
-        json_indent=indent,
-        batch_size=batch_size,
-    )
+    load_dotenv()
+
+    # Pre-configured parameters
+    out_dir = None
+    order_by = "date"
+    json_indent = 2
+    batch_size = 1000
+
+    try:
+        results = export_mod.export_chat_history(
+            output_dir=output_dir,
+            export_format=export_format.lower(),  # type: ignore[arg-type]
+            channel_ids=list(channel_ids) if channel_ids else None,
+            out_dir=out_dir,
+            order_by=order_by,
+            json_indent=json_indent,
+            batch_size=batch_size,
+        )
+    except FileNotFoundError as e:
+        # Common: user runs from a different cwd and uses default ./output.
+        raise click.ClickException(
+            f"{e}\n\nTip: check --output-dir (use an absolute path, or run from the project root)."
+        ) from e
+    except Exception as e:
+        logger.exception("Export failed")
+        raise click.ClickException(f"Export failed: {type(e).__name__}: {e}") from e
 
     if not results:
         click.echo("No DBs found to export.")
