@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class _OrderedGroup(click.Group):
-    _preferred_order = ("search", "scrape", "export")
+    _preferred_order = ("auth", "search", "scrape", "export")
 
     def list_commands(self, ctx: click.Context) -> list[str]:
         commands = list(self.commands)
@@ -62,7 +62,8 @@ def _load_telegram_creds(
         "Telegram Scraper CLI (tgsc).\n"
         "\n"
         "Usually, sequence of commands is:\n"
-        "search (to get channel id)\n"
+        "[OPTIONAL] auth (to authorize Telegram client and create/update the local session file)\n"
+        "-> search (to get channel id)\n"
         "-> scrape (to scrape messages by channel id)\n"
         "-> export (to export messages from scraped data to CSV/JSON)\n"
     ),
@@ -70,6 +71,43 @@ def _load_telegram_creds(
 @click.option("--log-level", default="INFO", show_default=True)
 def main(log_level: str) -> None:
     _configure_logging(log_level)
+
+
+@main.command(
+    "auth",
+    help="Authorize Telegram client and create/update the local session file.",
+)
+@click.option("--api-id", default=None, help="Overrides TELEGRAM_API_ID env var.")
+@click.option("--api-hash", default=None, help="Overrides TELEGRAM_API_HASH env var.")
+@click.option(
+    "--session-name", default=None, help="Overrides TELEGRAM_SESSION_NAME env var."
+)
+def auth_cmd(
+    api_id: Optional[str], api_hash: Optional[str], session_name: Optional[str]
+) -> None:
+    load_dotenv()
+
+    async def _run() -> None:
+        api_id_int, api_hash_val, session_val = _load_telegram_creds(
+            api_id=api_id,
+            api_hash=api_hash,
+            session_name=session_name,
+        )
+        client = await authorize_telegram_client(api_id_int, api_hash_val, session_val)
+        try:
+            me = await client.get_me()
+            username = getattr(me, "username", None) if me is not None else None
+            user_id = getattr(me, "id", None) if me is not None else None
+            if username:
+                click.echo(f"Authorized as @{username}")
+            elif user_id is not None:
+                click.echo(f"Authorized (user_id={user_id})")
+            else:
+                click.echo("Authorized.")
+        finally:
+            await client.disconnect()
+
+    asyncio.run(_run())
 
 
 @main.command("search", help="Search your dialogs (channels + groups).")
