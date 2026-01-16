@@ -1,7 +1,7 @@
 import logging
 import os
 import sys
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Optional, Literal
 from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat
 import asyncio

@@ -13,7 +13,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "qrcode>=7.0.0",
     "rapidfuzz>=3.0.0",
+    "click>=8.1.0",
 ]
+
+[project.scripts]
+tgsc = "telegram_scraper_cli.tgsc:main"
 
 [project.optional-dependencies]
 dev = [
