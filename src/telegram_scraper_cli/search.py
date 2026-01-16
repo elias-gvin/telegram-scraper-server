@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from typing import List, Dict, Optional, Any, Tuple
 from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat
@@ -29,6 +30,26 @@ class ChannelInfo:
             f"Username: @{self.username if self.username else 'N/A'} \n"
             f"Participants: {self.participants_count if self.participants_count is not None else 'N/A'}"
         )
+
+
+@dataclass(frozen=True)
+class SearchParams:
+    """
+    Controls which channel fields are searched and how fuzzy matching is applied.
+    """
+
+    search_by_username: bool = True
+    search_by_channel_id: bool = True
+    search_by_title: bool = True
+    # 0-100 (RapidFuzz ratio score). 100 means exact match.
+    title_similarity_threshold: int = 100
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    channel: ChannelInfo
+    score: float
+    matched_on: Literal["id", "username", "title"]
 
 
 async def get_channels_info(
@@ -79,32 +100,67 @@ async def get_channels_info(
         raise
 
 
-async def search_channels_by_title(
+async def search_channels(
     client: TelegramClient,
     search_query: str,
-    similarity_threshold: int = 100,
-) -> List[Tuple[ChannelInfo, float]]:
+    params: SearchParams = SearchParams(),
+) -> List[SearchResult]:
+    """
+    Search the user's dialogs (channels + groups) using enabled matching strategies.
+
+    - channel id: exact match against dialog id
+    - username: fuzzy partial ratio against @username (or raw username)
+    - title: fuzzy partial ratio against dialog title (threshold controlled by params)
+    """
     if not client.is_connected():
         raise ConnectionError("Telegram client is not connected")
 
     if not await client.is_user_authorized():
         raise ConnectionError("Telegram client is not authorized")
 
+    query = (search_query or "").strip()
+    if not query:
+        return []
+
     channels_info = await get_channels_info(client, limit=None)
 
     logger.info(
-        f"Searching for channels/groups matching '{search_query}' (similarity_threshold: {similarity_threshold})..."
+        "Searching channels/groups for '%s' (by_id=%s, by_username=%s, by_title=%s, title_threshold=%s)...",
+        query,
+        params.search_by_channel_id,
+        params.search_by_username,
+        params.search_by_title,
+        params.title_similarity_threshold,
     )
 
-    search_results = []
-    for channel_info in channels_info:
-        title_score = fuzz.partial_ratio(
-            search_query.lower(), channel_info.title.lower()
-        )
-        if title_score >= similarity_threshold:
-            search_results.append((channel_info, title_score))
-    return search_results
+    results: List[SearchResult] = []
+    normalized_query = query.lower().lstrip("@")
 
+    for channel_info in channels_info:
+        # Search by channel id (exact).
+        if params.search_by_channel_id:
+            if normalized_query == str(channel_info.id).lower():
+                results.append(SearchResult(channel=channel_info, score=100.0, matched_on="id"))
+                continue
+
+        # Search by username (fuzzy, no threshold beyond >0).
+        if params.search_by_username and channel_info.username:
+            uname_score = float(
+                fuzz.partial_ratio(normalized_query, channel_info.username.lower().lstrip("@"))
+            )
+            if uname_score > 0:
+                results.append(SearchResult(channel=channel_info, score=uname_score, matched_on="username"))
+                continue
+
+        # Search by title (fuzzy, thresholded).
+        if params.search_by_title:
+            title_score = float(fuzz.partial_ratio(normalized_query, channel_info.title.lower()))
+            if title_score >= float(params.title_similarity_threshold):
+                results.append(SearchResult(channel=channel_info, score=title_score, matched_on="title"))
+
+    # Higher score first, then stable-ish by title.
+    results.sort(key=lambda r: (-r.score, (r.channel.title or "").lower()))
+    return results
 
 # TODO: add ability to specify session name and credentials from command line.
 # TODO: add ability to search by name.
@@ -118,10 +174,17 @@ async def main():
     session_name = os.getenv("TELEGRAM_SESSION_NAME", "session")
     # TODO: add proper checks for read values.
     client = await authorize_telegram_client(api_id, api_hash, session_name)
-    results = await search_channels_by_title(client, "NotesScraperTest", similarity_threshold=80)
-    for result, score in results:
-        print(f"{result}")
-        print(f"Score: {score}\n")
+    params = SearchParams(
+        search_by_username=True,
+        search_by_channel_id=True,
+        search_by_title=True,
+        title_similarity_threshold=80,
+    )
+    results = await search_channels(client, "NotesScraperTest", params=params)
+    for r in results:
+        print(f"{r.channel}")
+        print(f"Matched on: {r.matched_on}")
+        print(f"Score: {r.score}\n")
 
 
 if __name__ == "__main__":
