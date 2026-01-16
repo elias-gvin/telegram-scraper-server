@@ -16,6 +16,20 @@ from .auth import authorize_telegram_client
 from . import db_helper
 
 
+class _OrderedGroup(click.Group):
+    """
+    Click lists commands alphabetically by default.
+    Override ordering so `tgsc --help` follows the typical workflow.
+    """
+
+    _preferred_order = ("search", "scrape", "export")
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        commands = list(self.commands)
+        order_index = {name: i for i, name in enumerate(self._preferred_order)}
+        return sorted(commands, key=lambda n: (order_index.get(n, 999), n))
+
+
 def _configure_logging(log_level: str) -> None:
     level = getattr(logging, (log_level or "INFO").upper(), logging.INFO)
     logging.basicConfig(
@@ -54,77 +68,13 @@ def _load_telegram_creds(
     return api_id_int, api_hash_val, session_val
 
 
-@click.group(help="Telegram Scraper CLI (tgsc).")
+@click.group(
+    cls=_OrderedGroup,
+    help="Telegram Scraper CLI (tgsc). Usually, sequence of commands is: search (to get channel id), scrape (to scrape messages), export (to export messages to CSV/JSON).",
+)
 @click.option("--log-level", default="INFO", show_default=True)
 def main(log_level: str) -> None:
     _configure_logging(log_level)
-
-
-@main.command(
-    "export", help="Export chat history from per-channel SQLite DB(s) to CSV/JSON."
-)
-@click.option(
-    "--output-dir",
-    type=click.Path(path_type=Path, file_okay=False, dir_okay=True),
-    default=Path("./output"),
-    show_default=True,
-    help="Base output directory containing per-channel DB folders, or a specific channel folder.",
-)
-@click.option(
-    "--format",
-    "export_format",
-    type=click.Choice(["csv", "json"], case_sensitive=False),
-    default="json",
-    show_default=True,
-)
-@click.option(
-    "--channel",
-    "channel_ids",
-    multiple=True,
-    help="Channel id to export. May be specified multiple times. If omitted, exports all channels found in output-dir.",
-)
-@click.option(
-    "--out-dir",
-    type=click.Path(path_type=Path, file_okay=False, dir_okay=True),
-    default=None,
-    help="Where to write exported files (default: next to each channel DB).",
-)
-@click.option("--order-by", default="date", show_default=True)
-@click.option("--batch-size", default=1000, show_default=True, type=int)
-@click.option("--json-indent", default=2, show_default=True, type=int)
-@click.option(
-    "--no-json-indent",
-    is_flag=True,
-    default=False,
-    help="Write compact JSON (indent=None).",
-)
-def export_cmd(
-    output_dir: Path,
-    export_format: str,
-    channel_ids: Sequence[str],
-    out_dir: Optional[Path],
-    order_by: str,
-    batch_size: int,
-    json_indent: int,
-    no_json_indent: bool,
-) -> None:
-    indent = None if no_json_indent else json_indent
-    results = export_mod.export_chat_history(
-        output_dir=output_dir,
-        export_format=export_format.lower(),  # type: ignore[arg-type]
-        channel_ids=list(channel_ids) if channel_ids else None,
-        out_dir=out_dir,
-        order_by=order_by,
-        json_indent=indent,
-        batch_size=batch_size,
-    )
-
-    if not results:
-        click.echo("No DBs found to export.")
-        return
-
-    for r in results:
-        click.echo(f"{r.channel_id}: rows={r.row_count} -> {r.output_file}")
 
 
 @main.command("search", help="Search your dialogs (channels + groups).")
@@ -288,6 +238,73 @@ def scrape_cmd(
             await client.disconnect()
 
     asyncio.run(_run())
+
+
+@main.command(
+    "export", help="Export chat history from per-channel SQLite DB(s) to CSV/JSON."
+)
+@click.option(
+    "--output-dir",
+    type=click.Path(path_type=Path, file_okay=False, dir_okay=True),
+    default=Path("./output"),
+    show_default=True,
+    help="Base output directory containing per-channel DB folders, or a specific channel folder.",
+)
+@click.option(
+    "--format",
+    "export_format",
+    type=click.Choice(["csv", "json"], case_sensitive=False),
+    default="json",
+    show_default=True,
+)
+@click.option(
+    "--channel",
+    "channel_ids",
+    multiple=True,
+    help="Channel id to export. May be specified multiple times. If omitted, exports all channels found in output-dir.",
+)
+@click.option(
+    "--out-dir",
+    type=click.Path(path_type=Path, file_okay=False, dir_okay=True),
+    default=None,
+    help="Where to write exported files (default: next to each channel DB).",
+)
+@click.option("--order-by", default="date", show_default=True)
+@click.option("--batch-size", default=1000, show_default=True, type=int)
+@click.option("--json-indent", default=2, show_default=True, type=int)
+@click.option(
+    "--no-json-indent",
+    is_flag=True,
+    default=False,
+    help="Write compact JSON (indent=None).",
+)
+def export_cmd(
+    output_dir: Path,
+    export_format: str,
+    channel_ids: Sequence[str],
+    out_dir: Optional[Path],
+    order_by: str,
+    batch_size: int,
+    json_indent: int,
+    no_json_indent: bool,
+) -> None:
+    indent = None if no_json_indent else json_indent
+    results = export_mod.export_chat_history(
+        output_dir=output_dir,
+        export_format=export_format.lower(),  # type: ignore[arg-type]
+        channel_ids=list(channel_ids) if channel_ids else None,
+        out_dir=out_dir,
+        order_by=order_by,
+        json_indent=indent,
+        batch_size=batch_size,
+    )
+
+    if not results:
+        click.echo("No DBs found to export.")
+        return
+
+    for r in results:
+        click.echo(f"{r.channel_id}: rows={r.row_count} -> {r.output_file}")
 
 
 if __name__ == "__main__":
