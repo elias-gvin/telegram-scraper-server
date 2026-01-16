@@ -162,34 +162,5 @@ async def search_channels(
     results.sort(key=lambda r: (-r.score, (r.channel.title or "").lower()))
     return results
 
-# TODO: add ability to specify session name and credentials from command line.
-# TODO: add ability to search by name.
-async def main():
-    # args = parse_args()
-    # logging.getLogger().setLevel(getattr(logging, args.log_level.upper()))
-
-    load_dotenv()
-    api_id = os.getenv("TELEGRAM_API_ID")
-    api_hash = os.getenv("TELEGRAM_API_HASH")
-    session_name = os.getenv("TELEGRAM_SESSION_NAME", "session")
-    # TODO: add proper checks for read values.
-    client = await authorize_telegram_client(api_id, api_hash, session_name)
-    params = SearchParams(
-        search_by_username=True,
-        search_by_channel_id=True,
-        search_by_title=True,
-        title_similarity_threshold=80,
-    )
-    results = await search_channels(client, "NotesScraperTest", params=params)
-    for r in results:
-        print(f"{r.channel}")
-        print(f"Matched on: {r.matched_on}")
-        print(f"Score: {r.score}\n")
-
-
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nInterrupted by user")
-        sys.exit(0)
+    pass

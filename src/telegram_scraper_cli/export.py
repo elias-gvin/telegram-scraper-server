@@ -128,54 +128,6 @@ def export_chat_history(
 
     return results
 
-# TODO: remove hardcoded channel id!!!
-def main() -> None:
-    """
-    Quick manual test runner for exports.
-
-    Example:
-      python -m telegram_scraper_cli.export --format json --channels -5263097314
-    """
-    parser = argparse.ArgumentParser(description="Export chat history from channel DB(s).")
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("./output"),
-        help="Base output directory that contains per-channel DB folders (default: ./output)",
-    )
-    parser.add_argument(
-        "--format",
-        dest="export_format",
-        choices=["csv", "json"],
-        default="json",
-        help="Export format (csv or json). Default: json",
-    )
-    parser.add_argument(
-        "--channels",
-        nargs="*",
-        default=["-5263097314"],
-        help="Channel IDs to export. If omitted, defaults to -5263097314 for quick testing.",
-    )
-    parser.add_argument(
-        "--out-dir",
-        type=Path,
-        default=None,
-        help="Where to write exported files (default: next to each channel DB).",
-    )
-
-    args = parser.parse_args()
-
-    results = export_chat_history(
-        output_dir=args.output_dir,
-        export_format=args.export_format,
-        channel_ids=args.channels if args.channels else None,
-        out_dir=args.out_dir,
-    )
-
-    for r in results:
-        print(f"Exported channel_id={r.channel_id} rows={r.row_count} -> {r.output_file}")
-
-
 if __name__ == "__main__":
     main()
 
