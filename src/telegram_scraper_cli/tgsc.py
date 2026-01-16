@@ -60,7 +60,9 @@ def main(log_level: str) -> None:
     _configure_logging(log_level)
 
 
-@main.command("export", help="Export chat history from per-channel SQLite DB(s) to CSV/JSON.")
+@main.command(
+    "export", help="Export chat history from per-channel SQLite DB(s) to CSV/JSON."
+)
 @click.option(
     "--output-dir",
     type=click.Path(path_type=Path, file_okay=False, dir_okay=True),
@@ -127,10 +129,14 @@ def export_cmd(
 
 @main.command("search", help="Search your dialogs (channels + groups).")
 @click.argument("query", type=str)
-@click.option("--env-file", type=click.Path(path_type=Path, dir_okay=False), default=None)
+@click.option(
+    "--env-file", type=click.Path(path_type=Path, dir_okay=False), default=None
+)
 @click.option("--api-id", default=None, help="Overrides TELEGRAM_API_ID env var.")
 @click.option("--api-hash", default=None, help="Overrides TELEGRAM_API_HASH env var.")
-@click.option("--session-name", default=None, help="Overrides TELEGRAM_SESSION_NAME env var.")
+@click.option(
+    "--session-name", default=None, help="Overrides TELEGRAM_SESSION_NAME env var."
+)
 @click.option("--by-id/--no-by-id", default=True, show_default=True)
 @click.option("--by-username/--no-by-username", default=True, show_default=True)
 @click.option("--by-title/--no-by-title", default=True, show_default=True)
@@ -174,7 +180,9 @@ def search_cmd(
             for r in results:
                 c = r.channel
                 uname = f"@{c.username}" if c.username else "N/A"
-                participants = c.participants_count if c.participants_count is not None else "N/A"
+                participants = (
+                    c.participants_count if c.participants_count is not None else "N/A"
+                )
                 click.echo(
                     f"{c.title} | id={c.id} | {c.type} | username={uname} | participants={participants} | matched_on={r.matched_on} | score={r.score:.1f}"
                 )
@@ -184,13 +192,26 @@ def search_cmd(
     asyncio.run(_run())
 
 
-@main.command("scrape", help="Scrape messages (and optional media) from a channel/group into SQLite.")
-@click.option("--env-file", type=click.Path(path_type=Path, dir_okay=False), default=None)
+@main.command(
+    "scrape",
+    help="Scrape messages (and optional media) from a channel/group into SQLite.",
+)
+@click.option(
+    "--env-file", type=click.Path(path_type=Path, dir_okay=False), default=None
+)
 @click.option("--api-id", default=None, help="Overrides TELEGRAM_API_ID env var.")
 @click.option("--api-hash", default=None, help="Overrides TELEGRAM_API_HASH env var.")
-@click.option("--session-name", default=None, help="Overrides TELEGRAM_SESSION_NAME env var.")
-@click.option("--channel-id", required=True, help="Numeric channel/chat id (e.g. -5263097314).")
-@click.option("--channel-name", default=None, help="Optional display name; will be auto-resolved if omitted.")
+@click.option(
+    "--session-name", default=None, help="Overrides TELEGRAM_SESSION_NAME env var."
+)
+@click.option(
+    "--channel-id", required=True, help="Numeric channel/chat id (e.g. -5263097314)."
+)
+@click.option(
+    "--channel-name",
+    default=None,
+    help="Optional display name; will be auto-resolved if omitted.",
+)
 @click.option(
     "--output-dir",
     type=click.Path(path_type=Path, file_okay=False, dir_okay=True),
@@ -200,8 +221,15 @@ def search_cmd(
 @click.option("--start-date", default=None, help="YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")
 @click.option("--end-date", default=None, help="YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")
 @click.option("--media/--no-media", default=True, show_default=True)
-@click.option("--max-media-size-mb", default=None, type=float, help="Skip downloading media larger than this size.")
-@click.option("--replace-existing/--no-replace-existing", default=True, show_default=True)
+@click.option(
+    "--max-media-size-mb",
+    default=None,
+    type=float,
+    help="Skip downloading media larger than this size.",
+)
+@click.option(
+    "--replace-existing/--no-replace-existing", default=True, show_default=True
+)
 def scrape_cmd(
     env_file: Optional[Path],
     api_id: Optional[str],

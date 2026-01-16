@@ -19,7 +19,9 @@ class ExportResult:
     row_count: int
 
 
-def _find_channel_db_files(output_dir: Path, channel_ids: Optional[Sequence[str]]) -> list[tuple[str, Path]]:
+def _find_channel_db_files(
+    output_dir: Path, channel_ids: Optional[Sequence[str]]
+) -> list[tuple[str, Path]]:
     """
     Return a list of (channel_id, db_file) pairs.
 
@@ -86,7 +88,9 @@ def export_chat_history(
 
     for channel_id, db_file in pairs:
         if not db_file.exists():
-            raise FileNotFoundError(f"DB file not found for channel_id={channel_id}: {db_file}")
+            raise FileNotFoundError(
+                f"DB file not found for channel_id={channel_id}: {db_file}"
+            )
 
         channel_dir = db_file.parent
         target_dir = Path(out_dir) if out_dir else channel_dir
@@ -128,6 +132,6 @@ def export_chat_history(
 
     return results
 
+
 if __name__ == "__main__":
     main()
-

@@ -140,27 +140,42 @@ async def search_channels(
         # Search by channel id (exact).
         if params.search_by_channel_id:
             if normalized_query == str(channel_info.id).lower():
-                results.append(SearchResult(channel=channel_info, score=100.0, matched_on="id"))
+                results.append(
+                    SearchResult(channel=channel_info, score=100.0, matched_on="id")
+                )
                 continue
 
         # Search by username (fuzzy, no threshold beyond >0).
         if params.search_by_username and channel_info.username:
             uname_score = float(
-                fuzz.partial_ratio(normalized_query, channel_info.username.lower().lstrip("@"))
+                fuzz.partial_ratio(
+                    normalized_query, channel_info.username.lower().lstrip("@")
+                )
             )
             if uname_score > 0:
-                results.append(SearchResult(channel=channel_info, score=uname_score, matched_on="username"))
+                results.append(
+                    SearchResult(
+                        channel=channel_info, score=uname_score, matched_on="username"
+                    )
+                )
                 continue
 
         # Search by title (fuzzy, thresholded).
         if params.search_by_title:
-            title_score = float(fuzz.partial_ratio(normalized_query, channel_info.title.lower()))
+            title_score = float(
+                fuzz.partial_ratio(normalized_query, channel_info.title.lower())
+            )
             if title_score >= float(params.title_similarity_threshold):
-                results.append(SearchResult(channel=channel_info, score=title_score, matched_on="title"))
+                results.append(
+                    SearchResult(
+                        channel=channel_info, score=title_score, matched_on="title"
+                    )
+                )
 
     # Higher score first, then stable-ish by title.
     results.sort(key=lambda r: (-r.score, (r.channel.title or "").lower()))
     return results
+
 
 if __name__ == "__main__":
     pass

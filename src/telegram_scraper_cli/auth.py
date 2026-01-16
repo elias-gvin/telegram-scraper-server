@@ -78,7 +78,9 @@ async def _phone_auth(client: TelegramClient) -> bool:
             logger.error("Invalid phone number provided")
             return False
         except FloodWaitError as e:
-            print(f"\n❌ Too many requests. Please wait {e.seconds} seconds before trying again.")
+            print(
+                f"\n❌ Too many requests. Please wait {e.seconds} seconds before trying again."
+            )
             logger.error(f"FloodWaitError: Wait {e.seconds} seconds")
             return False
         except Exception as e:
@@ -98,7 +100,9 @@ async def _phone_auth(client: TelegramClient) -> bool:
                 return True
             except PhoneCodeInvalidError:
                 if attempt < max_attempts - 1:
-                    print(f"\n❌ Invalid code. Please try again ({max_attempts - attempt - 1} attempt(s) remaining).")
+                    print(
+                        f"\n❌ Invalid code. Please try again ({max_attempts - attempt - 1} attempt(s) remaining)."
+                    )
                     logger.warning(f"Invalid phone code (attempt {attempt + 1})")
                 else:
                     print("\n❌ Invalid code. Maximum attempts reached.")
@@ -109,7 +113,9 @@ async def _phone_auth(client: TelegramClient) -> bool:
                 logger.error("Phone code expired")
                 return False
             except SessionPasswordNeededError:
-                password = input("Two-factor authentication enabled. Enter your password: ")
+                password = input(
+                    "Two-factor authentication enabled. Enter your password: "
+                )
                 try:
                     await client.sign_in(password=password)
                     print("\n✅ Successfully logged in with 2FA!")
@@ -119,7 +125,9 @@ async def _phone_auth(client: TelegramClient) -> bool:
                     logger.error(f"2FA authentication failed: {e}", exc_info=True)
                     return False
             except FloodWaitError as e:
-                print(f"\n❌ Too many requests. Please wait {e.seconds} seconds before trying again.")
+                print(
+                    f"\n❌ Too many requests. Please wait {e.seconds} seconds before trying again."
+                )
                 logger.error(f"FloodWaitError during sign-in: Wait {e.seconds} seconds")
                 return False
             except Exception as e:
@@ -182,7 +190,9 @@ async def authorize_telegram_client(
 
         if not success:
             await client.disconnect()
-            raise ConnectionError("Failed to authorize Telegram client. Please check your credentials and try again.")
+            raise ConnectionError(
+                "Failed to authorize Telegram client. Please check your credentials and try again."
+            )
 
         print("✅ Authorization successful!")
         return client
@@ -196,7 +206,10 @@ async def authorize_telegram_client(
         if client.is_connected():
             await client.disconnect()
         logger.error(f"Authorization failed: {e}", exc_info=True)
-        raise ConnectionError(f"Failed to connect or authorize Telegram client: {e}") from e
+        raise ConnectionError(
+            f"Failed to connect or authorize Telegram client: {e}"
+        ) from e
+
 
 if __name__ == "__main__":
     pass

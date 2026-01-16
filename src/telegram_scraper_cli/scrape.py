@@ -497,5 +497,6 @@ class OptimizedTelegramScraper:
                     error_text=error_text,
                 )
 
+
 if __name__ == "__main__":
     pass

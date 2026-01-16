@@ -132,7 +132,9 @@ def configure_connection(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys=ON")
 
 
-def ensure_messages_schema(conn: sqlite3.Connection, *, create_missing_tables: bool = True) -> None:
+def ensure_messages_schema(
+    conn: sqlite3.Connection, *, create_missing_tables: bool = True
+) -> None:
     """
     Ensure `messages` table exists with the desired schema.
 
@@ -165,14 +167,18 @@ def ensure_messages_schema(conn: sqlite3.Connection, *, create_missing_tables: b
             )
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_message_id ON messages(message_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_run_id ON messages(run_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_date ON messages(date)")
     configure_connection(conn)
     conn.commit()
 
 
-def ensure_metadata_schema(conn: sqlite3.Connection, *, create_missing_tables: bool = True) -> None:
+def ensure_metadata_schema(
+    conn: sqlite3.Connection, *, create_missing_tables: bool = True
+) -> None:
     """
     Ensure metadata tables exist:
       - channels
@@ -249,7 +255,9 @@ def ensure_metadata_schema(conn: sqlite3.Connection, *, create_missing_tables: b
     conn.commit()
 
 
-def ensure_schema(conn: sqlite3.Connection, *, create_missing_tables: bool = True) -> None:
+def ensure_schema(
+    conn: sqlite3.Connection, *, create_missing_tables: bool = True
+) -> None:
     """Ensure (or validate) all tables required by the app exist."""
     ensure_metadata_schema(conn, create_missing_tables=create_missing_tables)
     ensure_messages_schema(conn, create_missing_tables=create_missing_tables)
@@ -331,7 +339,9 @@ def export_messages(
     ensure_schema(conn, create_missing_tables=not validate_only)
 
     if order_by not in _ALLOWED_MESSAGES_ORDER_BY:
-        raise ValueError(f"order_by must be one of {sorted(_ALLOWED_MESSAGES_ORDER_BY)}")
+        raise ValueError(
+            f"order_by must be one of {sorted(_ALLOWED_MESSAGES_ORDER_BY)}"
+        )
 
     cursor = conn.cursor()
     cursor.execute(f"SELECT * FROM messages ORDER BY {order_by}")
@@ -339,7 +349,10 @@ def export_messages(
 
     if export_format == "csv":
         return _export_messages_to_csv(
-            cursor=cursor, output_file=output_file, columns=columns, batch_size=batch_size
+            cursor=cursor,
+            output_file=output_file,
+            columns=columns,
+            batch_size=batch_size,
         )
 
     # JSON export expects row-like objects to be convertible to dict()
