@@ -235,9 +235,7 @@ async def download_from_telegram_batched(
                 # Save batch to DB atomically
                 try:
                     conn.execute("BEGIN IMMEDIATE")
-                    db_helper.batch_upsert_messages_no_commit(
-                        conn, batch, channel_id=channel_id, run_id=1, replace_existing=True
-                    )
+                    _batch_insert_messages(conn, batch, channel_id)
                     conn.commit()
                 except Exception as e:
                     conn.rollback()
@@ -249,15 +247,14 @@ async def download_from_telegram_batched(
         
         except Exception as e:
             logger.error(f"Error processing message {message.id}: {e}")
-            continue
+            # Don't continue on error - fail the whole batch to maintain consistency
+            raise
     
     # Yield remaining messages
     if batch:
         try:
             conn.execute("BEGIN IMMEDIATE")
-            db_helper.batch_upsert_messages_no_commit(
-                conn, batch, channel_id=channel_id, run_id=1, replace_existing=True
-            )
+            _batch_insert_messages(conn, batch, channel_id)
             conn.commit()
         except Exception as e:
             conn.rollback()
@@ -267,25 +264,64 @@ async def download_from_telegram_batched(
         yield batch
 
 
-def batch_upsert_messages_no_commit(
+def _batch_insert_messages(
     conn: sqlite3.Connection,
     messages: List[MessageData],
-    *,
     channel_id: str | int,
-    run_id: int,
-    replace_existing: bool = True,
 ) -> None:
-    """Insert messages without committing (caller manages transaction)."""
+    """
+    Insert messages without auto-committing (caller manages transaction).
+    This is a helper for atomic batch operations.
+    """
     if not messages:
         return
     
-    db_helper.batch_upsert_messages(
-        conn, messages,
-        channel_id=channel_id,
-        run_id=run_id,
-        replace_existing=replace_existing
+    data = [
+        (
+            str(channel_id),
+            int(msg.message_id),
+            str(msg.date),
+            int(msg.sender_id),
+            msg.first_name,
+            msg.last_name,
+            msg.username,
+            str(msg.message),
+            msg.media_type,
+            msg.media_path,
+            msg.reply_to,
+            msg.post_author,
+            int(msg.is_forwarded),
+            msg.forwarded_from_channel_id,
+        )
+        for msg in messages
+    ]
+    
+    # Always use INSERT OR REPLACE to handle duplicates
+    conn.executemany(
+        """
+        INSERT INTO messages
+          (channel_id, message_id, date, sender_id, first_name, last_name, username,
+           message, media_type, media_path, reply_to, post_author,
+           is_forwarded, forwarded_from_channel_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(message_id) DO UPDATE SET
+          channel_id=excluded.channel_id,
+          date=excluded.date,
+          sender_id=excluded.sender_id,
+          first_name=excluded.first_name,
+          last_name=excluded.last_name,
+          username=excluded.username,
+          message=excluded.message,
+          media_type=excluded.media_type,
+          media_path=excluded.media_path,
+          reply_to=excluded.reply_to,
+          post_author=excluded.post_author,
+          is_forwarded=excluded.is_forwarded,
+          forwarded_from_channel_id=excluded.forwarded_from_channel_id
+        """,
+        data,
     )
-    # Note: batch_upsert_messages commits, so we need a version that doesn't
+    # NO COMMIT - caller manages transaction
 
 
 async def stream_messages_with_cache(

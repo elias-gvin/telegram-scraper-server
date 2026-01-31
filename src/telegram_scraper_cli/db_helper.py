@@ -23,7 +23,6 @@ class SchemaMismatchError(RuntimeError):
 _DESIRED_COLS: Tuple[str, ...] = (
     "id",
     "channel_id",
-    "run_id",
     "message_id",
     "date",
     "sender_id",
@@ -42,7 +41,6 @@ _DESIRED_COLS: Tuple[str, ...] = (
 _DESIRED_COLUMNS_SQL = (
     "id INTEGER PRIMARY KEY, "
     "channel_id TEXT NOT NULL, "
-    "run_id INTEGER NOT NULL, "
     "message_id INTEGER UNIQUE, "
     "date TEXT, "
     "sender_id INTEGER, "
@@ -56,23 +54,10 @@ _DESIRED_COLUMNS_SQL = (
     "post_author TEXT, "
     "is_forwarded INTEGER, "
     "forwarded_from_channel_id INTEGER, "
-    "FOREIGN KEY(channel_id) REFERENCES channels(channel_id), "
-    "FOREIGN KEY(run_id) REFERENCES scrape_runs(run_id)"
+    "FOREIGN KEY(channel_id) REFERENCES channels(channel_id)"
 )
 
 _CHANNELS_COLS: Tuple[str, ...] = ("channel_id", "channel_name", "user")
-_SCRAPE_RUNS_COLS: Tuple[str, ...] = (
-    "run_id",
-    "launched_at",
-    "triggered_by_user",
-    "params_json",
-    "successful",
-    "media_successful_count",
-    "media_failed_count",
-    "media_skipped_count",
-    "error_text",
-    "finished_at",
-)
 
 _ALLOWED_MESSAGES_ORDER_BY: frozenset[str] = frozenset({"date", "message_id", "id"})
 
@@ -170,7 +155,6 @@ def ensure_messages_schema(
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id)"
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_run_id ON messages(run_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_date ON messages(date)")
     configure_connection(conn)
     conn.commit()
@@ -182,7 +166,6 @@ def ensure_metadata_schema(
     """
     Ensure metadata tables exist:
       - channels
-      - scrape_runs
 
     If a table exists but schema differs, raise SchemaMismatchError.
     """
@@ -212,44 +195,6 @@ def ensure_metadata_schema(
             raise SchemaMismatchError(
                 "Existing SQLite schema for table 'channels' does not match expected schema. "
                 f"expected={list(_CHANNELS_COLS)}, got={existing}."
-            )
-
-    # scrape_runs
-    cur.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='scrape_runs'"
-    )
-    runs_exists = cur.fetchone() is not None
-    if not runs_exists:
-        if not create_missing_tables:
-            raise SchemaMismatchError(
-                "Missing required table 'scrape_runs' (refusing to create tables in validate-only mode)."
-            )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS scrape_runs (
-              run_id INTEGER PRIMARY KEY AUTOINCREMENT,
-              launched_at TEXT NOT NULL,
-              triggered_by_user TEXT,
-              params_json TEXT NOT NULL,
-              successful INTEGER NOT NULL DEFAULT 0,
-              media_successful_count INTEGER NOT NULL DEFAULT 0,
-              media_failed_count INTEGER NOT NULL DEFAULT 0,
-              media_skipped_count INTEGER NOT NULL DEFAULT 0,
-              error_text TEXT,
-              finished_at TEXT
-            )
-            """
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_scrape_runs_launched_at ON scrape_runs(launched_at)"
-        )
-    else:
-        cur.execute("PRAGMA table_info(scrape_runs)")
-        existing = [row[1] for row in cur.fetchall()]
-        if set(existing) != set(_SCRAPE_RUNS_COLS):
-            raise SchemaMismatchError(
-                "Existing SQLite schema for table 'scrape_runs' does not match expected schema. "
-                f"expected={list(_SCRAPE_RUNS_COLS)}, got={existing}."
             )
 
     conn.commit()
@@ -419,74 +364,28 @@ def upsert_channel(
     conn.commit()
 
 
-def create_scrape_run(
-    conn: sqlite3.Connection, *, params_json: str, triggered_by_user: Optional[str]
-) -> int:
-    launched_at = datetime.now(timezone.utc).isoformat()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO scrape_runs (
-          launched_at, triggered_by_user, params_json, successful, media_successful_count
-        )
-        VALUES (?, ?, ?, 0, 0)
-        """,
-        (launched_at, triggered_by_user, params_json),
-    )
-    conn.commit()
-    return int(cur.lastrowid)
-
-
-def finalize_scrape_run(
-    conn: sqlite3.Connection,
-    *,
-    run_id: int,
-    successful: bool,
-    media_successful_count: int,
-    media_failed_count: int,
-    media_skipped_count: int,
-    error_text: str | None,
-) -> None:
-    finished_at = datetime.now(timezone.utc).isoformat()
-    conn.execute(
-        """
-        UPDATE scrape_runs
-        SET successful=?,
-            media_successful_count=?,
-            media_failed_count=?,
-            media_skipped_count=?,
-            error_text=?,
-            finished_at=?
-        WHERE run_id=?
-        """,
-        (
-            1 if successful else 0,
-            int(media_successful_count),
-            int(media_failed_count),
-            int(media_skipped_count),
-            error_text,
-            finished_at,
-            int(run_id),
-        ),
-    )
-    conn.commit()
-
-
 def batch_upsert_messages(
     conn: sqlite3.Connection,
     messages: Sequence[object],
     *,
     channel_id: str | int,
-    run_id: int,
     replace_existing: bool,
 ) -> None:
+    """
+    Insert or update messages in the database.
+    
+    Args:
+        conn: Database connection
+        messages: Sequence of message objects with attributes matching MessageData
+        channel_id: Channel ID these messages belong to
+        replace_existing: If True, update existing messages; if False, skip duplicates
+    """
     if not messages:
         return
 
     data = [
         (
             str(channel_id),
-            int(run_id),
             int(getattr(msg, "message_id")),
             str(getattr(msg, "date")),
             int(getattr(msg, "sender_id")),
@@ -508,13 +407,12 @@ def batch_upsert_messages(
         conn.executemany(
             """
             INSERT INTO messages
-              (channel_id, run_id, message_id, date, sender_id, first_name, last_name, username,
+              (channel_id, message_id, date, sender_id, first_name, last_name, username,
                message, media_type, media_path, reply_to, post_author,
                is_forwarded, forwarded_from_channel_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(message_id) DO UPDATE SET
               channel_id=excluded.channel_id,
-              run_id=excluded.run_id,
               date=excluded.date,
               sender_id=excluded.sender_id,
               first_name=excluded.first_name,
@@ -534,10 +432,10 @@ def batch_upsert_messages(
         conn.executemany(
             """
             INSERT OR IGNORE INTO messages
-              (channel_id, run_id, message_id, date, sender_id, first_name, last_name, username,
+              (channel_id, message_id, date, sender_id, first_name, last_name, username,
                message, media_type, media_path, reply_to, post_author,
                is_forwarded, forwarded_from_channel_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             data,
         )
