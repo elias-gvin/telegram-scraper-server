@@ -199,15 +199,9 @@ async def download_from_telegram_batched(
                 forwarded_from_channel_id=forwarded_from_channel_id,
             )
 
-            # Store media UUID if we have media
-            if media_path:
-                media_uuid = db_helper.store_media_with_uuid(
-                    conn, message.id, media_path, file_size=media_size
-                )
-                msg_data.media_uuid = media_uuid
-            else:
-                msg_data.media_uuid = None
-
+            # Store media info for later UUID generation
+            # (UUID must be generated AFTER message is inserted due to FK constraint)
+            msg_data.media_uuid = None  # Will be set after insertion
             msg_data.media_size = media_size
 
             batch.append(msg_data)
@@ -217,7 +211,14 @@ async def download_from_telegram_batched(
                 # Save batch to DB atomically
                 try:
                     conn.execute("BEGIN IMMEDIATE")
+                    # First insert messages
                     _batch_insert_messages(conn, batch, channel_id)
+                    # Then store media UUIDs (requires messages to exist due to FK)
+                    for msg in batch:
+                        if msg.media_path:
+                            msg.media_uuid = db_helper.store_media_with_uuid(
+                                conn, msg.message_id, msg.media_path, file_size=msg.media_size
+                            )
                     conn.commit()
                 except Exception as e:
                     conn.rollback()
@@ -236,7 +237,14 @@ async def download_from_telegram_batched(
     if batch:
         try:
             conn.execute("BEGIN IMMEDIATE")
+            # First insert messages
             _batch_insert_messages(conn, batch, channel_id)
+            # Then store media UUIDs (requires messages to exist due to FK)
+            for msg in batch:
+                if msg.media_path:
+                    msg.media_uuid = db_helper.store_media_with_uuid(
+                        conn, msg.message_id, msg.media_path, file_size=msg.media_size
+                    )
             conn.commit()
         except Exception as e:
             conn.rollback()
