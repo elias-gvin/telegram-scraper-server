@@ -14,10 +14,15 @@ dependencies = [
     "qrcode>=7.0.0",
     "rapidfuzz>=3.0.0",
     "click>=8.1.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pyyaml>=6.0.0",
 ]
 
 [project.scripts]
 tgsc = "telegram_scraper_cli.tgsc:main"
+tgsc-server = "telegram_scraper_cli.server:main"
+tgsc-auth = "telegram_scraper_cli.authenticate:main"
 
 [project.optional-dependencies]
 dev = [

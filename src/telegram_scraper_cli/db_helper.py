@@ -255,12 +255,47 @@ def ensure_metadata_schema(
     conn.commit()
 
 
+def ensure_media_files_schema(
+    conn: sqlite3.Connection, *, create_missing_tables: bool = True
+) -> None:
+    """
+    Ensure media_files table exists for UUID → file path mapping.
+    """
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='media_files'")
+    table_exists = cur.fetchone() is not None
+    
+    if not table_exists:
+        if not create_missing_tables:
+            raise SchemaMismatchError(
+                "Missing required table 'media_files' (refusing to create tables in validate-only mode)."
+            )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS media_files (
+              uuid TEXT PRIMARY KEY,
+              message_id INTEGER UNIQUE NOT NULL,
+              file_path TEXT NOT NULL,
+              file_size INTEGER,
+              mime_type TEXT,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(message_id) REFERENCES messages(message_id)
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_media_uuid ON media_files(uuid)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_media_message_id ON media_files(message_id)")
+    
+    conn.commit()
+
+
 def ensure_schema(
     conn: sqlite3.Connection, *, create_missing_tables: bool = True
 ) -> None:
     """Ensure (or validate) all tables required by the app exist."""
     ensure_metadata_schema(conn, create_missing_tables=create_missing_tables)
     ensure_messages_schema(conn, create_missing_tables=create_missing_tables)
+    ensure_media_files_schema(conn, create_missing_tables=create_missing_tables)
 
 
 def _export_messages_to_csv(
@@ -526,3 +561,158 @@ def check_db_connection(conn: sqlite3.Connection) -> bool:
         return True
     except (sqlite3.ProgrammingError, sqlite3.OperationalError):
         return False
+
+
+# ============================================================================
+# Media UUID Management
+# ============================================================================
+
+import uuid as uuid_lib
+import mimetypes
+
+
+def generate_media_uuid() -> str:
+    """Generate UUID for media file."""
+    return str(uuid_lib.uuid4())
+
+
+def store_media_with_uuid(
+    conn: sqlite3.Connection,
+    message_id: int,
+    file_path: str,
+    file_size: Optional[int] = None,
+    mime_type: Optional[str] = None,
+) -> str:
+    """
+    Store media file info with UUID and return the UUID.
+    
+    Args:
+        conn: Database connection
+        message_id: Message ID this media belongs to
+        file_path: File system path to media file
+        file_size: File size in bytes (optional)
+        mime_type: MIME type (optional, will be guessed if not provided)
+    
+    Returns:
+        UUID string
+    """
+    media_uuid = generate_media_uuid()
+    
+    # Guess MIME type if not provided
+    if mime_type is None:
+        mime_type, _ = mimetypes.guess_type(file_path)
+    
+    # Get file size if not provided
+    if file_size is None:
+        try:
+            file_size = Path(file_path).stat().st_size
+        except Exception:
+            file_size = None
+    
+    conn.execute(
+        """
+        INSERT INTO media_files (uuid, message_id, file_path, file_size, mime_type, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(message_id) DO UPDATE SET
+            uuid=excluded.uuid,
+            file_path=excluded.file_path,
+            file_size=excluded.file_size,
+            mime_type=excluded.mime_type
+        """,
+        (media_uuid, message_id, file_path, file_size, mime_type, datetime.now(timezone.utc).isoformat())
+    )
+    conn.commit()
+    
+    return media_uuid
+
+
+def get_media_uuid_by_message_id(
+    conn: sqlite3.Connection,
+    message_id: int
+) -> Optional[str]:
+    """Get media UUID for a message."""
+    cursor = conn.execute(
+        "SELECT uuid FROM media_files WHERE message_id = ?",
+        (message_id,)
+    )
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+
+def get_media_info_by_uuid(
+    conn: sqlite3.Connection,
+    media_uuid: str
+) -> Optional[dict]:
+    """
+    Get media file info by UUID.
+    
+    Returns:
+        Dict with keys: uuid, message_id, file_path, file_size, mime_type, created_at
+        or None if not found
+    """
+    cursor = conn.execute(
+        "SELECT uuid, message_id, file_path, file_size, mime_type, created_at FROM media_files WHERE uuid = ?",
+        (media_uuid,)
+    )
+    row = cursor.fetchone()
+    if row:
+        return {
+            "uuid": row[0],
+            "message_id": row[1],
+            "file_path": row[2],
+            "file_size": row[3],
+            "mime_type": row[4],
+            "created_at": row[5],
+        }
+    return None
+
+
+def get_cached_date_range(
+    conn: sqlite3.Connection,
+    channel_id: str | int
+) -> Optional[Tuple[datetime, datetime]]:
+    """
+    Get the date range of cached messages for a channel.
+    
+    Returns:
+        Tuple of (min_date, max_date) or None if no messages
+    """
+    cursor = conn.execute(
+        "SELECT MIN(date), MAX(date) FROM messages WHERE channel_id = ?",
+        (str(channel_id),)
+    )
+    row = cursor.fetchone()
+    if row and row[0] and row[1]:
+        min_date = datetime.fromisoformat(row[0])
+        max_date = datetime.fromisoformat(row[1])
+        return (min_date, max_date)
+    return None
+
+
+def iter_messages_in_range(
+    conn: sqlite3.Connection,
+    channel_id: str | int,
+    start_date: datetime,
+    end_date: datetime,
+    batch_size: int = 100
+):
+    """
+    Iterate over messages in a date range in batches.
+    
+    Yields batches of sqlite3.Row objects.
+    """
+    conn.row_factory = sqlite3.Row
+    cursor = conn.execute(
+        """
+        SELECT * FROM messages
+        WHERE channel_id = ? AND date >= ? AND date <= ?
+        ORDER BY date ASC
+        """,
+        (str(channel_id), start_date.isoformat(), end_date.isoformat())
+    )
+    
+    while True:
+        batch = cursor.fetchmany(batch_size)
+        if not batch:
+            break
+        yield batch
