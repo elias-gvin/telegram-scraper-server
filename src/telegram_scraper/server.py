@@ -1,9 +1,9 @@
 """FastAPI server for Telegram Scraper."""
 
-import argparse
 import logging
 from pathlib import Path
 
+import click
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -86,129 +86,162 @@ def create_app(config: ServerConfig) -> FastAPI:
 app = create_app(load_config())
 
 
-def parse_args():
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Telegram Scraper API Server",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
+@click.command()
+@click.option(
+    "--config",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to YAML configuration file",
+)
+@click.option(
+    "--api-id",
+    type=str,
+    default=None,
+    help="Telegram API ID (overrides config file)",
+)
+@click.option(
+    "--api-hash",
+    type=str,
+    default=None,
+    help="Telegram API hash (overrides config file)",
+)
+@click.option(
+    "--download-media/--no-download-media",
+    default=True,
+    help="Enable or disable media download (default: enabled)",
+)
+@click.option(
+    "--max-media-size-mb",
+    type=float,
+    default=20.0,
+    help="Maximum media file size in MB (0 for no limit, default: 20)",
+)
+@click.option(
+    "--telegram-batch-size",
+    type=int,
+    default=100,
+    help="Batch size for downloading from Telegram (default: 100)",
+)
+@click.option(
+    "--output-path",
+    type=click.Path(path_type=Path),
+    default="./output",
+    help="Output directory for cache and media (default: ./output)",
+)
+@click.option(
+    "--sessions-path",
+    type=click.Path(path_type=Path),
+    default="./sessions",
+    help="Directory for Telegram session files (default: ./sessions)",
+)
+@click.option(
+    "--host",
+    type=str,
+    default=None,
+    help="Server host",
+)
+@click.option(
+    "--port",
+    type=int,
+    default=None,
+    help="Server port",
+)
+@click.pass_context
+def main(
+    ctx,
+    config,
+    api_id,
+    api_hash,
+    download_media,
+    max_media_size_mb,
+    telegram_batch_size,
+    output_path,
+    sessions_path,
+    host,
+    port,
+):
+    """Telegram Scraper API Server.
 
-    # Config file
-    parser.add_argument(
-        "--config", type=Path, default=None, help="Path to YAML configuration file"
-    )
+    Start the FastAPI server for the Telegram Scraper with smart cache management.
 
-    # Telegram credentials
-    parser.add_argument(
-        "--api-id", type=str, help="Telegram API ID (overrides config file)"
-    )
-    parser.add_argument(
-        "--api-hash", type=str, help="Telegram API hash (overrides config file)"
-    )
-
-    # Download settings
-    parser.add_argument(
-        "--download-media",
-        action="store_true",
-        default=None,
-        help="Enable media download",
-    )
-    parser.add_argument(
-        "--no-download-media", action="store_true", help="Disable media download"
-    )
-    parser.add_argument(
-        "--max-media-size-mb",
-        type=float,
-        help="Maximum media file size in MB (0 for no limit)",
-    )
-    parser.add_argument(
-        "--telegram-batch-size",
-        type=int,
-        help="Batch size for downloading from Telegram",
-    )
-
-    # Storage paths
-    parser.add_argument(
-        "--output-path", type=Path, help="Output directory for cache and media"
-    )
-    parser.add_argument(
-        "--sessions-path", type=Path, help="Directory for Telegram session files"
-    )
-
-    # Server settings
-    parser.add_argument("--host", type=str, help="Server host")
-    parser.add_argument("--port", type=int, help="Server port")
-
-    return parser.parse_args()
-
-
-def main():
-    """Main entry point for the server."""
-    args = parse_args()
-
+    \b
+    Configuration Priority (highest to lowest):
+    1. CLI arguments (if explicitly provided)
+    2. Environment variables
+    3. Config file values (if --config specified)
+    4. Defaults
+    """
     # Build CLI overrides dict
+    # Only include parameters that were explicitly provided or use defaults if no config file
     cli_overrides = {}
 
-    if args.api_id:
-        cli_overrides["api_id"] = args.api_id
-    if args.api_hash:
-        cli_overrides["api_hash"] = args.api_hash
-
-    # Handle download_media boolean
-    if args.download_media:
-        cli_overrides["download_media"] = True
-    elif args.no_download_media:
-        cli_overrides["download_media"] = False
-
-    if args.max_media_size_mb is not None:
-        cli_overrides["max_media_size_mb"] = (
-            args.max_media_size_mb if args.max_media_size_mb > 0 else None
+    # Helper to check if parameter was explicitly provided
+    def is_provided(param_name):
+        return (
+            ctx.get_parameter_source(param_name)
+            == click.core.ParameterSource.COMMANDLINE
         )
-    if args.telegram_batch_size:
-        cli_overrides["telegram_batch_size"] = args.telegram_batch_size
 
-    if args.output_path:
-        cli_overrides["output_path"] = args.output_path
-    if args.sessions_path:
-        cli_overrides["sessions_path"] = args.sessions_path
+    if api_id:
+        cli_overrides["api_id"] = api_id
+    if api_hash:
+        cli_overrides["api_hash"] = api_hash
 
-    if args.host:
-        cli_overrides["host"] = args.host
-    if args.port:
-        cli_overrides["port"] = args.port
+    # For parameters with defaults, only override if explicitly provided OR no config file
+    if is_provided("download_media") or config is None:
+        cli_overrides["download_media"] = download_media
+
+    if is_provided("max_media_size_mb") or config is None:
+        cli_overrides["max_media_size_mb"] = (
+            max_media_size_mb if max_media_size_mb > 0 else None
+        )
+
+    if is_provided("telegram_batch_size") or config is None:
+        cli_overrides["telegram_batch_size"] = telegram_batch_size
+
+    if is_provided("output_path") or config is None:
+        cli_overrides["output_path"] = output_path
+
+    if is_provided("sessions_path") or config is None:
+        cli_overrides["sessions_path"] = sessions_path
+
+    if host:
+        cli_overrides["host"] = host
+    if port:
+        cli_overrides["port"] = port
 
     # Load configuration
     try:
-        config = load_config(config_path=args.config, cli_overrides=cli_overrides)
+        server_config = load_config(config_path=config, cli_overrides=cli_overrides)
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
-        return 1
+        raise click.ClickException(str(e))
 
     # Log configuration
     logger.info("=" * 60)
     logger.info("Telegram Scraper API Server")
     logger.info("=" * 60)
-    logger.info(f"API ID: {config.api_id}")
-    logger.info(f"Download media: {config.download_media}")
-    if config.download_media:
-        if config.max_media_size_mb:
-            logger.info(f"Max media size: {config.max_media_size_mb} MB")
+    logger.info(f"API ID: {server_config.api_id}")
+    logger.info(f"Download media: {server_config.download_media}")
+    if server_config.download_media:
+        if server_config.max_media_size_mb:
+            logger.info(f"Max media size: {server_config.max_media_size_mb} MB")
         else:
             logger.info(f"Max media size: unlimited")
-    logger.info(f"Telegram batch size: {config.telegram_batch_size}")
-    logger.info(f"Output path: {config.output_path}")
-    logger.info(f"Sessions path: {config.sessions_path}")
-    logger.info(f"Server: {config.host}:{config.port}")
+    logger.info(f"Telegram batch size: {server_config.telegram_batch_size}")
+    logger.info(f"Output path: {server_config.output_path}")
+    logger.info(f"Sessions path: {server_config.sessions_path}")
+    logger.info(f"Server: {server_config.host}:{server_config.port}")
     logger.info("=" * 60)
 
     # Create app
-    app = create_app(config)
+    app_instance = create_app(server_config)
 
     # Run server
-    uvicorn.run(app, host=config.host, port=config.port, log_level="info")
-
-    return 0
+    uvicorn.run(
+        app_instance, host=server_config.host, port=server_config.port, log_level="info"
+    )
 
 
 if __name__ == "__main__":
-    exit(main())
+    main()

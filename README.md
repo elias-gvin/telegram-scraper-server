@@ -122,11 +122,16 @@ Download media file by UUID (provided in message response).
 
 ## Configuration
 
-### Priority
+### Priority Order
 
-`CLI Parameters > Environment Variables > YAML > Defaults`
+Parameters are resolved in the following priority (highest to lowest):
 
-### YAML (`config.yaml`)
+1. **CLI arguments** (if explicitly provided)
+2. **Environment variables**
+3. **Config file values** (if `--config` specified)
+4. **Defaults**
+
+### YAML Config File
 
 ```yaml
 api_id: "YOUR_API_ID"
@@ -152,11 +157,17 @@ export MAX_MEDIA_SIZE_MB=50
 ### CLI Parameters
 
 ```bash
-tgsc-server \
-  --api-id YOUR_ID \
-  --api-hash YOUR_HASH \
-  --download-media \
-  --port 8000
+# View all available parameters
+tgsc-server --help
+
+# With config file
+tgsc-server --config config.yaml
+
+# Override specific parameters
+tgsc-server --config config.yaml --port 9000 --no-download-media
+
+# Without config file (uses defaults)
+tgsc-server --api-id YOUR_ID --api-hash YOUR_HASH
 ```
 
 ## Documentation
