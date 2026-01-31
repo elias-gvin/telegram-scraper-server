@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from enum import Enum
 from difflib import SequenceMatcher
 from telethon import TelegramClient
+from telethon.tl.types import Channel, Chat
 
 from .auth import get_telegram_client
 
@@ -96,10 +97,19 @@ async def find_channels(
             # Fuzzy search in user's dialogs
             channels = []
             async for dialog in client.iter_dialogs():
-                if dialog.is_channel:
-                    score = fuzzy_match_score(dialog.title, query)
-                    if score >= title_threshold:
-                        channels.append(entity_to_channel_info(dialog.entity))
+                entity = dialog.entity
+                
+                # Skip system dialog (Telegram Service Notifications)
+                is_system_dialog = dialog.id == 777000
+                # Only include channels and chats/groups
+                is_channel_or_chat = isinstance(entity, Channel) or isinstance(entity, Chat)
+                
+                if is_system_dialog or not is_channel_or_chat:
+                    continue
+
+                score = fuzzy_match_score(dialog.title, query)
+                if score >= title_threshold:
+                    channels.append(entity_to_channel_info(dialog.entity))
             
             # Sort by match score (best matches first)
             channels.sort(
