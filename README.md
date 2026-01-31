@@ -1,6 +1,6 @@
 # Telegram Scraper API
 
-FastAPI-based server for scraping and caching Telegram messages with intelligent gap detection and streaming support.
+FastAPI-based server for scraping and caching Telegram messages with streaming support.
 
 ## Features
 
@@ -32,6 +32,8 @@ Get Telegram API credentials:
 2. Log in with your phone number
 3. Create a new application
 4. Note your `api_id` and `api_hash`
+
+See [Obtain API id](https://core.telegram.org/api/obtaining_api_id) for more details.
 
 ### Setup
 
@@ -118,33 +120,6 @@ Header: X-Telegram-Username: your_username
 
 Download media file by UUID (provided in message response).
 
-## Architecture
-
-### Smart Caching System
-
-The server intelligently manages cache:
-
-1. **First Request**: Downloads from Telegram → Saves to SQLite → Returns to client
-2. **Subsequent Requests**: 
-   - Checks cache for date range
-   - Downloads only missing gaps
-   - Returns combined results (cache + new data)
-3. **Atomic Commits**: Each batch commits atomically - no partial data on errors
-
-### Two-Buffer Streaming
-
-- **Telegram batch** (configurable): Internal download chunks
-- **Client batch** (per-request): API response chunks
-- Independent sizes for optimal performance
-
-### Database Schema
-
-- `messages` - Message content and metadata
-- `media_files` - UUID → file path mapping
-- `channels` - Channel information
-
-**No gaps guarantee**: If data exists for a range in cache, it's complete and valid.
-
 ## Configuration
 
 ### Priority
@@ -186,62 +161,7 @@ tgsc-server \
 
 ## Documentation
 
-- **[Complete Guide](GUIDE.md)** - Setup, API reference, examples, troubleshooting
-- **[Interactive API Docs](http://localhost:8000/docs)** - Swagger UI (when server is running)
-- **[Database Schema](CHANGES_ATOMIC_COMMITS.md)** - Technical details on atomic commits
-
-## Project Structure
-
-```
-telegram_scraper_cli/
-├── src/telegram_scraper_cli/
-│   ├── api/              # FastAPI routes
-│   │   ├── channels.py   # Channel search
-│   │   ├── history.py    # Message history  
-│   │   ├── files.py      # Media serving
-│   │   └── auth.py       # Authentication
-│   ├── server.py         # FastAPI server
-│   ├── authenticate.py   # Auth CLI tool
-│   ├── config.py         # Configuration
-│   ├── scraper.py        # Cache-aware scraping
-│   ├── models.py         # Data models
-│   ├── media_downloader.py  # Media download logic
-│   └── db_helper.py      # Database utilities
-├── config.example.yaml   # Example configuration
-└── README.md            # This file
-```
-
-## JavaScript Client Example
-
-```javascript
-const API_BASE = 'http://localhost:8000/api/v1';
-const USERNAME = 'john_doe';
-
-// Stream messages
-const es = new EventSource(
-  `${API_BASE}/history/123?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250`
-);
-
-es.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  data.messages.forEach(msg => {
-    displayMessage(msg);
-    
-    // Download media if present
-    if (msg.media_uuid) {
-      fetchMedia(msg.media_uuid);
-    }
-  });
-};
-
-async function fetchMedia(uuid) {
-  const response = await fetch(`${API_BASE}/files/${uuid}`, {
-    headers: { 'X-Telegram-Username': USERNAME }
-  });
-  const blob = await response.blob();
-  // Display media...
-}
-```
+**[Interactive API Docs](http://localhost:8000/docs)** - Swagger UI (when server is running)
 
 ## Development
 
@@ -250,6 +170,8 @@ async function fetchMedia(uuid) {
 ```bash
 uvicorn telegram_scraper_cli.server:app --reload --host 0.0.0.0 --port 8000
 ```
+
+> **Note:** When using `uvicorn` directly, the server will use environment variables instead of `config.yaml`. Set `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, etc. as environment variables, or use `tgsc-server --config config.yaml` to load from the config file.
 
 ### Check linting
 
