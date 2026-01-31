@@ -339,7 +339,9 @@ async def stream_messages_with_cache(
         segments = [TimelineSegment(start_date, end_date, "telegram")]
     else:
         # Check cache and find gaps
-        cached_range = db_helper.get_cached_date_range(conn, channel_id)
+        cached_range_tuple = db_helper.get_cached_date_range(conn, channel_id)
+        # Convert tuple to DateRange object
+        cached_range = DateRange(cached_range_tuple[0], cached_range_tuple[1]) if cached_range_tuple else None
         requested = DateRange(start_date, end_date)
 
         gaps = find_gaps(requested, cached_range)
