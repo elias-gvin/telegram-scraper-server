@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass, field
+from dotenv import load_dotenv
 import yaml
 
 
@@ -107,6 +108,8 @@ def load_config(
     Returns:
         ServerConfig instance
     """
+    load_dotenv()
+    
     # Start with empty dict
     config_data = {}
     
