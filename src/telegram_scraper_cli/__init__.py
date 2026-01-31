@@ -1,6 +1,6 @@
 # """Telegram Scraper CLI - Tools for authorization, search, and dumping."""
 
-# from .auth import authorize_telegram_client
+# from .authenticate import authorize_telegram_client
 # from .search import search_channels, list_all_channels
 # from .dump import dump_channel
 # from .scraper import OptimizedTelegramScraper, ScrapeParams, MessageData

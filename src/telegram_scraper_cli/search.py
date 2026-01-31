@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from rapidfuzz import fuzz
 from dataclasses import dataclass
 
-from .auth import authorize_telegram_client
+from .authenticate import authorize_telegram_client
 
 logger = logging.getLogger(__name__)
 

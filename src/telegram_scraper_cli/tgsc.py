@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from . import export as export_mod
 from . import scrape as scrape_mod
 from . import search as search_mod
-from .auth import authorize_telegram_client
+from .authenticate import authorize_telegram_client
 from . import db_helper
 
 logger = logging.getLogger(__name__)

@@ -67,10 +67,14 @@ Successfully implemented a complete FastAPI server for the Telegram Scraper with
 - ✅ Health check endpoint
 
 ### 6. Authentication Tool (`authenticate.py`)
-- ✅ CLI for user authentication
+- ✅ CLI for user authentication with Click
+- ✅ QR code authentication (recommended)
+- ✅ Phone number authentication with retry logic
 - ✅ Interactive phone/code/2FA flow
+- ✅ Comprehensive error handling (FloodWait, InvalidCode, etc.)
 - ✅ Session file creation
-- ✅ Configuration support
+- ✅ Configuration support (YAML/ENV/CLI)
+- ✅ User info display after successful authentication
 
 ### 7. Documentation
 - ✅ Updated README.md with server features
@@ -156,17 +160,16 @@ CLI Parameters > Environment Variables > YAML File > Defaults
 src/telegram_scraper_cli/
 ├── api/
 │   ├── __init__.py          # Router exports
-│   ├── auth.py              # Auth dependencies
+│   ├── auth.py              # API authentication helpers
 │   ├── channels.py          # Channel search endpoint
 │   ├── history.py           # Message history endpoint
 │   └── files.py             # Media file serving
 ├── config.py                # Configuration management
 ├── server.py                # FastAPI server
 ├── streaming_scraper.py     # Cache-aware streaming
-├── authenticate.py          # Auth CLI tool
+├── authenticate.py          # Authentication & CLI tool (QR + Phone)
 ├── db_helper.py             # Database utilities (extended)
 ├── scrape.py                # Core scraping (reused)
-├── auth.py                  # Existing auth utilities
 └── ...                      # Other existing files
 ```
 

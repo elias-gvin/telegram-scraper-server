@@ -153,14 +153,14 @@ telegram_scraper_cli/
 │   ├── api/              # FastAPI routes
 │   │   ├── channels.py   # Channel search endpoint
 │   │   ├── history.py    # Message history endpoint
-│   │   └── files.py      # Media file serving
+│   │   ├── files.py      # Media file serving
+│   │   └── auth.py       # API authentication helpers
 │   ├── server.py         # FastAPI server
 │   ├── config.py         # Configuration management
 │   ├── streaming_scraper.py  # Cache-aware streaming
 │   ├── scrape.py         # Core scraping logic
 │   ├── db_helper.py      # Database utilities
-│   ├── auth.py           # Authentication
-│   └── authenticate.py   # Auth CLI tool
+│   └── authenticate.py   # Authentication & CLI tool
 ├── config.example.yaml   # Example configuration
 ├── SERVER_README.md      # Detailed server docs
 └── README.md            # This file

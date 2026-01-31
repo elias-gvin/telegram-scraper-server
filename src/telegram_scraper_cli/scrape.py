@@ -26,7 +26,7 @@ from tqdm.asyncio import tqdm as atqdm
 from tqdm import tqdm
 from dotenv import load_dotenv
 import os
-from .auth import authorize_telegram_client
+from .authenticate import authorize_telegram_client
 from . import db_helper
 
 
