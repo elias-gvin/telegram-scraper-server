@@ -57,8 +57,7 @@ async def _qr_code_auth(client: TelegramClient) -> bool:
         return True
     except SessionPasswordNeededError:
         password = click.prompt(
-            "Two-factor authentication enabled. Enter your password",
-            hide_input=True
+            "Two-factor authentication enabled. Enter your password", hide_input=True
         )
         try:
             await client.sign_in(password=password)
@@ -81,13 +80,15 @@ async def _phone_auth(client: TelegramClient) -> bool:
         try:
             await client.send_code_request(phone)
         except PhoneNumberInvalidError:
-            click.secho("\n❌ Invalid phone number. Please check and try again.", fg="red")
+            click.secho(
+                "\n❌ Invalid phone number. Please check and try again.", fg="red"
+            )
             logger.error("Invalid phone number provided")
             return False
         except FloodWaitError as e:
             click.secho(
                 f"\n❌ Too many requests. Please wait {e.seconds} seconds before trying again.",
-                fg="red"
+                fg="red",
             )
             logger.error(f"FloodWaitError: Wait {e.seconds} seconds")
             return False
@@ -110,21 +111,25 @@ async def _phone_auth(client: TelegramClient) -> bool:
                 if attempt < max_attempts - 1:
                     click.secho(
                         f"\n❌ Invalid code. Please try again ({max_attempts - attempt - 1} attempt(s) remaining).",
-                        fg="red"
+                        fg="red",
                     )
                     logger.warning(f"Invalid phone code (attempt {attempt + 1})")
                 else:
-                    click.secho("\n❌ Invalid code. Maximum attempts reached.", fg="red")
+                    click.secho(
+                        "\n❌ Invalid code. Maximum attempts reached.", fg="red"
+                    )
                     logger.error("Invalid phone code: Maximum attempts reached")
                     return False
             except PhoneCodeExpiredError:
-                click.secho("\n❌ The code has expired. Please request a new code.", fg="red")
+                click.secho(
+                    "\n❌ The code has expired. Please request a new code.", fg="red"
+                )
                 logger.error("Phone code expired")
                 return False
             except SessionPasswordNeededError:
                 password = click.prompt(
                     "Two-factor authentication enabled. Enter your password",
-                    hide_input=True
+                    hide_input=True,
                 )
                 try:
                     await client.sign_in(password=password)
@@ -137,7 +142,7 @@ async def _phone_auth(client: TelegramClient) -> bool:
             except FloodWaitError as e:
                 click.secho(
                     f"\n❌ Too many requests. Please wait {e.seconds} seconds before trying again.",
-                    fg="red"
+                    fg="red",
                 )
                 logger.error(f"FloodWaitError during sign-in: Wait {e.seconds} seconds")
                 return False
@@ -154,10 +159,10 @@ async def _phone_auth(client: TelegramClient) -> bool:
 
 
 async def authorize_telegram_client(
-    api_id: int, 
-    api_hash: str, 
+    api_id: int,
+    api_hash: str,
     session_name: str = "session",
-    show_user_info: bool = False
+    show_user_info: bool = False,
 ) -> TelegramClient:
     """
     Create, connect, and authorize a Telegram client.
@@ -212,10 +217,10 @@ async def authorize_telegram_client(
             )
 
         click.secho("✅ Authorization successful!", fg="green")
-        
+
         if show_user_info:
             await _display_user_info(client, session_name)
-        
+
         return client
 
     except ConnectionError:
@@ -250,46 +255,43 @@ async def _display_user_info(client: TelegramClient, session_name: str) -> None:
 
 
 async def authenticate_user_cli(
-    username: str, 
-    api_id: int, 
-    api_hash: str, 
-    sessions_path: Path
+    username: str, api_id: int, api_hash: str, sessions_path: Path
 ) -> int:
     """
     CLI wrapper for user authentication with named session files.
-    
+
     Args:
         username: Username identifier for the session file
         api_id: Telegram API ID
         api_hash: Telegram API hash
         sessions_path: Path to sessions directory
-    
+
     Returns:
         Exit code (0 for success, 1 for failure)
     """
     # Ensure sessions directory exists
     sessions_path.mkdir(parents=True, exist_ok=True)
-    
+
     session_file = str(sessions_path / username)
-    
+
     click.secho(f"🔐 Authenticating user: {username}", bold=True)
     click.echo("=" * 60)
-    
+
     try:
         client = await authorize_telegram_client(
             api_id=api_id,
             api_hash=api_hash,
             session_name=session_file,
-            show_user_info=True
+            show_user_info=True,
         )
-        
+
         click.echo(f"\n✅ You can now use this session with:")
         click.secho(f"   X-Telegram-Username: {username}", fg="cyan")
         click.echo()
-        
+
         await client.disconnect()
         return 0
-        
+
     except ConnectionError as e:
         click.secho(f"\n❌ Authentication failed: {e}", fg="red")
         return 1
@@ -305,40 +307,34 @@ async def authenticate_user_cli(
     "--config",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Path to YAML configuration file"
+    help="Path to YAML configuration file",
 )
 @click.option(
-    "--api-id",
-    type=str,
-    default=None,
-    help="Telegram API ID (overrides config)"
+    "--api-id", type=str, default=None, help="Telegram API ID (overrides config)"
 )
 @click.option(
-    "--api-hash",
-    type=str,
-    default=None,
-    help="Telegram API hash (overrides config)"
+    "--api-hash", type=str, default=None, help="Telegram API hash (overrides config)"
 )
 @click.option(
     "--sessions-path",
     type=click.Path(path_type=Path),
     default=None,
-    help="Path to sessions directory (overrides config)"
+    help="Path to sessions directory (overrides config)",
 )
 def main(username, config, api_id, api_hash, sessions_path):
     """
     Authenticate with Telegram and create session file.
-    
+
     USERNAME is the identifier for the session file (can be any name).
-    
+
     \b
     Examples:
       # Authenticate with config file
       tgsc-auth myusername --config config.yaml
-      
+
       # Authenticate with explicit credentials
       tgsc-auth myusername --api-id 12345 --api-hash abc123
-      
+
       # Use environment variables (TELEGRAM_API_ID, TELEGRAM_API_HASH)
       tgsc-auth myusername
     """
@@ -350,7 +346,7 @@ def main(username, config, api_id, api_hash, sessions_path):
         cli_overrides["api_hash"] = api_hash
     if sessions_path:
         cli_overrides["sessions_path"] = sessions_path
-    
+
     # Load config
     try:
         loaded_config = load_config(config_path=config, cli_overrides=cli_overrides)
@@ -361,15 +357,17 @@ def main(username, config, api_id, api_hash, sessions_path):
         click.echo("  2. Environment variables (TELEGRAM_API_ID, TELEGRAM_API_HASH)")
         click.echo("  3. CLI parameters (--api-id, --api-hash)")
         sys.exit(1)
-    
+
     # Run authentication
     try:
-        exit_code = asyncio.run(authenticate_user_cli(
-            username,
-            loaded_config.api_id,
-            loaded_config.api_hash,
-            loaded_config.sessions_path
-        ))
+        exit_code = asyncio.run(
+            authenticate_user_cli(
+                username,
+                loaded_config.api_id,
+                loaded_config.api_hash,
+                loaded_config.sessions_path,
+            )
+        )
         sys.exit(exit_code)
     except KeyboardInterrupt:
         click.secho("\n\n❌ Authentication cancelled by user", fg="red")
@@ -382,4 +380,3 @@ def main(username, config, api_id, api_hash, sessions_path):
 
 if __name__ == "__main__":
     main()
-

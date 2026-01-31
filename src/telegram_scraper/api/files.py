@@ -26,40 +26,42 @@ def set_config(config: ServerConfig):
 def find_media_by_uuid(media_uuid: str) -> dict:
     """
     Search for media file by UUID across all channel databases.
-    
+
     Returns:
         Dict with media info or raises HTTPException if not found
     """
     if _config is None:
-        raise HTTPException(status_code=500, detail="Server configuration not initialized")
-    
+        raise HTTPException(
+            status_code=500, detail="Server configuration not initialized"
+        )
+
     # Search through all channel databases
     output_path = _config.output_path
-    
+
     if not output_path.exists():
         raise HTTPException(status_code=404, detail="Media not found")
-    
+
     # Iterate through channel directories
     for channel_dir in output_path.iterdir():
         if not channel_dir.is_dir():
             continue
-        
+
         # Check for database file
         db_file = channel_dir / f"{channel_dir.name}.db"
         if not db_file.exists():
             continue
-        
+
         try:
             conn = db_helper.open_db_file(db_file, row_factory=False)
             media_info = db_helper.get_media_info_by_uuid(conn, media_uuid)
             conn.close()
-            
+
             if media_info:
                 return media_info
         except Exception:
             # Skip databases with errors
             continue
-    
+
     raise HTTPException(status_code=404, detail="Media not found")
 
 
@@ -73,7 +75,7 @@ def find_media_by_uuid(media_uuid: str) -> dict:
     
     Example:
     - `/api/v1/files/a1b2c3d4-e5f6-7890-abcd-ef1234567890`
-    """
+    """,
 )
 async def get_file(
     file_uuid: Annotated[str, Path(description="Media file UUID")],
@@ -81,23 +83,22 @@ async def get_file(
 ):
     """
     Download media file by UUID.
-    
+
     Requires X-Telegram-Username header for authentication.
     """
     # Find media in databases
     media_info = find_media_by_uuid(file_uuid)
-    
+
     file_path = FilePath(media_info["file_path"])
-    
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Media file not found on disk")
-    
+
     # Determine media type for response
     media_type = media_info.get("mime_type") or "application/octet-stream"
-    
+
     return FileResponse(
         path=str(file_path),
         filename=file_path.name,
         media_type=media_type,
     )
-

@@ -207,9 +207,11 @@ def ensure_media_files_schema(
     Ensure media_files table exists for UUID → file path mapping.
     """
     cur = conn.cursor()
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='media_files'")
+    cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='media_files'"
+    )
     table_exists = cur.fetchone() is not None
-    
+
     if not table_exists:
         if not create_missing_tables:
             raise SchemaMismatchError(
@@ -229,8 +231,10 @@ def ensure_media_files_schema(
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_media_uuid ON media_files(uuid)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_media_message_id ON media_files(message_id)")
-    
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_media_message_id ON media_files(message_id)"
+        )
+
     conn.commit()
 
 
@@ -373,7 +377,7 @@ def batch_upsert_messages(
 ) -> None:
     """
     Insert or update messages in the database.
-    
+
     Args:
         conn: Database connection
         messages: Sequence of message objects with attributes matching MessageData
@@ -483,30 +487,30 @@ def store_media_with_uuid(
 ) -> str:
     """
     Store media file info with UUID and return the UUID.
-    
+
     Args:
         conn: Database connection
         message_id: Message ID this media belongs to
         file_path: File system path to media file
         file_size: File size in bytes (optional)
         mime_type: MIME type (optional, will be guessed if not provided)
-    
+
     Returns:
         UUID string
     """
     media_uuid = generate_media_uuid()
-    
+
     # Guess MIME type if not provided
     if mime_type is None:
         mime_type, _ = mimetypes.guess_type(file_path)
-    
+
     # Get file size if not provided
     if file_size is None:
         try:
             file_size = Path(file_path).stat().st_size
         except Exception:
             file_size = None
-    
+
     conn.execute(
         """
         INSERT INTO media_files (uuid, message_id, file_path, file_size, mime_type, created_at)
@@ -517,40 +521,42 @@ def store_media_with_uuid(
             file_size=excluded.file_size,
             mime_type=excluded.mime_type
         """,
-        (media_uuid, message_id, file_path, file_size, mime_type, datetime.now(timezone.utc).isoformat())
+        (
+            media_uuid,
+            message_id,
+            file_path,
+            file_size,
+            mime_type,
+            datetime.now(timezone.utc).isoformat(),
+        ),
     )
     conn.commit()
-    
+
     return media_uuid
 
 
 def get_media_uuid_by_message_id(
-    conn: sqlite3.Connection,
-    message_id: int
+    conn: sqlite3.Connection, message_id: int
 ) -> Optional[str]:
     """Get media UUID for a message."""
     cursor = conn.execute(
-        "SELECT uuid FROM media_files WHERE message_id = ?",
-        (message_id,)
+        "SELECT uuid FROM media_files WHERE message_id = ?", (message_id,)
     )
     row = cursor.fetchone()
     return row[0] if row else None
 
 
-def get_media_info_by_uuid(
-    conn: sqlite3.Connection,
-    media_uuid: str
-) -> Optional[dict]:
+def get_media_info_by_uuid(conn: sqlite3.Connection, media_uuid: str) -> Optional[dict]:
     """
     Get media file info by UUID.
-    
+
     Returns:
         Dict with keys: uuid, message_id, file_path, file_size, mime_type, created_at
         or None if not found
     """
     cursor = conn.execute(
         "SELECT uuid, message_id, file_path, file_size, mime_type, created_at FROM media_files WHERE uuid = ?",
-        (media_uuid,)
+        (media_uuid,),
     )
     row = cursor.fetchone()
     if row:
@@ -566,18 +572,17 @@ def get_media_info_by_uuid(
 
 
 def get_cached_date_range(
-    conn: sqlite3.Connection,
-    channel_id: str | int
+    conn: sqlite3.Connection, channel_id: str | int
 ) -> Optional[Tuple[datetime, datetime]]:
     """
     Get the date range of cached messages for a channel.
-    
+
     Returns:
         Tuple of (min_date, max_date) or None if no messages
     """
     cursor = conn.execute(
         "SELECT MIN(date), MAX(date) FROM messages WHERE channel_id = ?",
-        (str(channel_id),)
+        (str(channel_id),),
     )
     row = cursor.fetchone()
     if row and row[0] and row[1]:
@@ -592,11 +597,11 @@ def iter_messages_in_range(
     channel_id: str | int,
     start_date: datetime,
     end_date: datetime,
-    batch_size: int = 100
+    batch_size: int = 100,
 ):
     """
     Iterate over messages in a date range in batches.
-    
+
     Yields batches of sqlite3.Row objects.
     """
     conn.row_factory = sqlite3.Row
@@ -606,9 +611,9 @@ def iter_messages_in_range(
         WHERE channel_id = ? AND date >= ? AND date <= ?
         ORDER BY date ASC
         """,
-        (str(channel_id), start_date.isoformat(), end_date.isoformat())
+        (str(channel_id), start_date.isoformat(), end_date.isoformat()),
     )
-    
+
     while True:
         batch = cursor.fetchmany(batch_size)
         if not batch:

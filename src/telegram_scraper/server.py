@@ -17,8 +17,7 @@ from .api import files as api_files
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -26,10 +25,10 @@ logger = logging.getLogger(__name__)
 def create_app(config: ServerConfig) -> FastAPI:
     """
     Create and configure FastAPI application.
-    
+
     Args:
         config: Server configuration
-    
+
     Returns:
         Configured FastAPI app
     """
@@ -40,7 +39,7 @@ def create_app(config: ServerConfig) -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
     )
-    
+
     # CORS middleware (adjust origins as needed)
     app.add_middleware(
         CORSMiddleware,
@@ -49,17 +48,17 @@ def create_app(config: ServerConfig) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    
+
     # Set config in API modules
     api_auth.set_config(config)
     api_history.set_config(config)
     api_files.set_config(config)
-    
+
     # Include routers
     app.include_router(channels_router)
     app.include_router(history_router)
     app.include_router(files_router)
-    
+
     @app.get("/", tags=["root"])
     async def root():
         """Root endpoint with API information."""
@@ -70,15 +69,15 @@ def create_app(config: ServerConfig) -> FastAPI:
             "endpoints": {
                 "find_channels": "/api/v1/find-channels",
                 "history": "/api/v1/history/{channel_id}",
-                "files": "/api/v1/files/{file_uuid}"
-            }
+                "files": "/api/v1/files/{file_uuid}",
+            },
         }
-    
+
     @app.get("/health", tags=["health"])
     async def health():
         """Health check endpoint."""
         return {"status": "healthy"}
-    
+
     return app
 
 
@@ -91,119 +90,100 @@ def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description="Telegram Scraper API Server",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    
+
     # Config file
     parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Path to YAML configuration file"
+        "--config", type=Path, default=None, help="Path to YAML configuration file"
     )
-    
+
     # Telegram credentials
     parser.add_argument(
-        "--api-id",
-        type=str,
-        help="Telegram API ID (overrides config file)"
+        "--api-id", type=str, help="Telegram API ID (overrides config file)"
     )
     parser.add_argument(
-        "--api-hash",
-        type=str,
-        help="Telegram API hash (overrides config file)"
+        "--api-hash", type=str, help="Telegram API hash (overrides config file)"
     )
-    
+
     # Download settings
     parser.add_argument(
         "--download-media",
         action="store_true",
         default=None,
-        help="Enable media download"
+        help="Enable media download",
     )
     parser.add_argument(
-        "--no-download-media",
-        action="store_true",
-        help="Disable media download"
+        "--no-download-media", action="store_true", help="Disable media download"
     )
     parser.add_argument(
         "--max-media-size-mb",
         type=float,
-        help="Maximum media file size in MB (0 for no limit)"
+        help="Maximum media file size in MB (0 for no limit)",
     )
     parser.add_argument(
         "--telegram-batch-size",
         type=int,
-        help="Batch size for downloading from Telegram"
+        help="Batch size for downloading from Telegram",
     )
-    
+
     # Storage paths
     parser.add_argument(
-        "--output-path",
-        type=Path,
-        help="Output directory for cache and media"
+        "--output-path", type=Path, help="Output directory for cache and media"
     )
     parser.add_argument(
-        "--sessions-path",
-        type=Path,
-        help="Directory for Telegram session files"
+        "--sessions-path", type=Path, help="Directory for Telegram session files"
     )
-    
+
     # Server settings
-    parser.add_argument(
-        "--host",
-        type=str,
-        help="Server host"
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        help="Server port"
-    )
-    
+    parser.add_argument("--host", type=str, help="Server host")
+    parser.add_argument("--port", type=int, help="Server port")
+
     return parser.parse_args()
 
 
 def main():
     """Main entry point for the server."""
     args = parse_args()
-    
+
     # Build CLI overrides dict
     cli_overrides = {}
-    
+
     if args.api_id:
         cli_overrides["api_id"] = args.api_id
     if args.api_hash:
         cli_overrides["api_hash"] = args.api_hash
-    
+
     # Handle download_media boolean
     if args.download_media:
         cli_overrides["download_media"] = True
     elif args.no_download_media:
         cli_overrides["download_media"] = False
-    
+
     if args.max_media_size_mb is not None:
-        cli_overrides["max_media_size_mb"] = args.max_media_size_mb if args.max_media_size_mb > 0 else None
+        cli_overrides["max_media_size_mb"] = (
+            args.max_media_size_mb if args.max_media_size_mb > 0 else None
+        )
     if args.telegram_batch_size:
         cli_overrides["telegram_batch_size"] = args.telegram_batch_size
-    
+
     if args.output_path:
         cli_overrides["output_path"] = args.output_path
     if args.sessions_path:
         cli_overrides["sessions_path"] = args.sessions_path
-    
+
     if args.host:
         cli_overrides["host"] = args.host
     if args.port:
         cli_overrides["port"] = args.port
-    
+
     # Load configuration
     try:
         config = load_config(config_path=args.config, cli_overrides=cli_overrides)
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
         return 1
-    
+
     # Log configuration
     logger.info("=" * 60)
     logger.info("Telegram Scraper API Server")
@@ -220,21 +200,15 @@ def main():
     logger.info(f"Sessions path: {config.sessions_path}")
     logger.info(f"Server: {config.host}:{config.port}")
     logger.info("=" * 60)
-    
+
     # Create app
     app = create_app(config)
-    
+
     # Run server
-    uvicorn.run(
-        app,
-        host=config.host,
-        port=config.port,
-        log_level="info"
-    )
-    
+    uvicorn.run(app, host=config.host, port=config.port, log_level="info")
+
     return 0
 
 
 if __name__ == "__main__":
     exit(main())
-

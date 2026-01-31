@@ -7,6 +7,7 @@ from typing import Optional
 @dataclass
 class MessageData:
     """Message data model."""
+
     message_id: int
     date: str
     sender_id: int
@@ -28,6 +29,7 @@ class MessageData:
 @dataclass
 class DateRange:
     """Date range with start and end."""
+
     start: "datetime"  # type: ignore
     end: "datetime"  # type: ignore
 
@@ -35,7 +37,7 @@ class DateRange:
 @dataclass
 class TimelineSegment:
     """Timeline segment marking cache or download region."""
+
     start: "datetime"  # type: ignore
     end: "datetime"  # type: ignore
     source: str  # "cache" or "telegram"
-

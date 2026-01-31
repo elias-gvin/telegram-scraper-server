@@ -18,71 +18,69 @@ def set_config(config: ServerConfig):
 
 
 async def get_authenticated_user(
-    x_telegram_username: Annotated[str, Header()] = None
+    x_telegram_username: Annotated[str, Header()] = None,
 ) -> str:
     """
     Get authenticated user from X-Telegram-Username header.
     Validates that user has active Telegram session.
-    
+
     Raises:
         HTTPException: If user is not authenticated
-    
+
     Returns:
         Username string
     """
     if not x_telegram_username:
         raise HTTPException(
-            status_code=401,
-            detail="Missing X-Telegram-Username header"
+            status_code=401, detail="Missing X-Telegram-Username header"
         )
-    
+
     if _config is None:
         raise HTTPException(
-            status_code=500,
-            detail="Server configuration not initialized"
+            status_code=500, detail="Server configuration not initialized"
         )
-    
+
     # Check if user has valid Telegram session
     session_file = _config.sessions_path / f"{x_telegram_username}.session"
     if not session_file.exists():
         raise HTTPException(
             status_code=401,
-            detail=f"User '{x_telegram_username}' not authenticated. Please run authentication first."
+            detail=f"User '{x_telegram_username}' not authenticated. Please run authentication first.",
         )
-    
+
     return x_telegram_username
 
 
-async def get_telegram_client(username: str = Depends(get_authenticated_user)) -> TelegramClient:
+async def get_telegram_client(
+    username: str = Depends(get_authenticated_user),
+) -> TelegramClient:
     """
     Get Telegram client for authenticated user.
-    
+
     Args:
         username: Authenticated username (from dependency)
-    
+
     Returns:
         Connected and authorized TelegramClient
-    
+
     Raises:
         HTTPException: If session is invalid or not authorized
     """
     if _config is None:
         raise HTTPException(
-            status_code=500,
-            detail="Server configuration not initialized"
+            status_code=500, detail="Server configuration not initialized"
         )
-    
+
     session_path = str(_config.sessions_path / username)
-    
+
     client = TelegramClient(session_path, _config.api_id, _config.api_hash)
     await client.connect()
-    
+
     if not await client.is_user_authorized():
         await client.disconnect()
         raise HTTPException(
             status_code=401,
-            detail=f"Telegram session for '{username}' is not authorized"
+            detail=f"Telegram session for '{username}' is not authorized",
         )
-    
-    return client
 
+    return client

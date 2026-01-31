@@ -5,4 +5,3 @@ from .history import router as history_router
 from .files import router as files_router
 
 __all__ = ["channels_router", "history_router", "files_router"]
-
