@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import load_config, ServerConfig
 from .api import channels_router, history_router, files_router
-from .api import auth as api_auth
+from .api import auth_utils as api_auth
 from .api import history as api_history
 from .api import files as api_files
 

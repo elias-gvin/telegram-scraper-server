@@ -10,7 +10,7 @@ import logging
 
 from telethon import TelegramClient
 
-from .auth import get_telegram_client
+from .auth_utils import get_telegram_client
 from ..config import ServerConfig
 from .. import db_helper
 from ..scraper import stream_messages_with_cache

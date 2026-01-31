@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from typing import Annotated
 from pathlib import Path as FilePath
 
-from .auth import get_authenticated_user
+from .auth_utils import get_authenticated_user
 from ..config import ServerConfig
 from .. import db_helper
 

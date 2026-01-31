@@ -8,7 +8,7 @@ from difflib import SequenceMatcher
 from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat
 
-from .auth import get_telegram_client
+from .auth_utils import get_telegram_client
 
 
 router = APIRouter(prefix="/api/v1", tags=["channels"])
