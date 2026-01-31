@@ -340,8 +340,19 @@ async def stream_messages_with_cache(
     else:
         # Check cache and find gaps
         cached_range_tuple = db_helper.get_cached_date_range(conn, channel_id)
-        # Convert tuple to DateRange object
-        cached_range = DateRange(cached_range_tuple[0], cached_range_tuple[1]) if cached_range_tuple else None
+        # Convert tuple to DateRange object (ensure timezone-aware)
+        if cached_range_tuple:
+            # Database dates might be timezone-naive, so add UTC timezone if needed
+            cached_start = cached_range_tuple[0]
+            cached_end = cached_range_tuple[1]
+            if cached_start.tzinfo is None:
+                cached_start = cached_start.replace(tzinfo=timezone.utc)
+            if cached_end.tzinfo is None:
+                cached_end = cached_end.replace(tzinfo=timezone.utc)
+            cached_range = DateRange(cached_start, cached_end)
+        else:
+            cached_range = None
+        
         requested = DateRange(start_date, end_date)
 
         gaps = find_gaps(requested, cached_range)

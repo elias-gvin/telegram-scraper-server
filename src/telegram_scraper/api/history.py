@@ -2,9 +2,9 @@
 
 from fastapi import APIRouter, Query, Path, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 
@@ -56,12 +56,14 @@ class MessagesListResponse(BaseModel):
 
 
 def parse_date(date_str: str) -> datetime:
-    """Parse date string to datetime."""
+    """Parse date string to datetime (assumes UTC if no timezone specified)."""
     try:
-        return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+        dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+        return dt.replace(tzinfo=timezone.utc)
     except ValueError:
         try:
-            return datetime.strptime(date_str, "%Y-%m-%d")
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            return dt.replace(tzinfo=timezone.utc)
         except ValueError:
             raise HTTPException(
                 status_code=400,
@@ -77,21 +79,27 @@ def parse_date(date_str: str) -> datetime:
     
     - chunk_size=0: Return all messages as single JSON array
     - chunk_size>0: Stream messages in chunks via Server-Sent Events (SSE)
+    - start_date: Optional, defaults to beginning of chat
+    - end_date: Optional, defaults to current time
     
     Examples:
     - `/api/v1/history/123?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250`
-    - `/api/v1/history/123?start_date=2024-01-01&end_date=2024-01-31&chunk_size=0` (all at once)
+    - `/api/v1/history/123?chunk_size=0` (all messages, all time)
+    - `/api/v1/history/123?end_date=2024-01-31` (from beginning to Jan 31)
+    - `/api/v1/history/123?start_date=2024-01-01` (from Jan 1 to now)
     - `/api/v1/history/123?start_date=2024-01-01&end_date=2024-01-31&force_refresh=true` (bypass cache)
     """,
 )
 async def get_history(
     channel_id: Annotated[int, Path(description="Channel ID")],
     start_date: Annotated[
-        str, Query(description="Start date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)")
-    ],
+        Optional[str], 
+        Query(description="Start date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to chat beginning")
+    ] = None,
     end_date: Annotated[
-        str, Query(description="End date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)")
-    ],
+        Optional[str], 
+        Query(description="End date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to now")
+    ] = None,
     chunk_size: Annotated[
         int,
         Query(ge=0, description="Chunk size (0 = return all messages in one response)"),
@@ -112,9 +120,19 @@ async def get_history(
         )
 
     try:
-        # Parse dates
-        start_dt = parse_date(start_date)
-        end_dt = parse_date(end_date)
+        # Parse dates - use defaults if not provided
+        if start_date:
+            start_dt = parse_date(start_date)
+        else:
+            # FIXME: Ugly vibe-coded approach to handle very old messages. Fix it
+            # Default to beginning of Telegram (or a very early date)
+            start_dt = datetime(2013, 1, 1, tzinfo=timezone.utc)
+        
+        if end_date:
+            end_dt = parse_date(end_date)
+        else:
+            # Default to current time
+            end_dt = datetime.now(timezone.utc)
 
         if start_dt >= end_dt:
             raise HTTPException(
