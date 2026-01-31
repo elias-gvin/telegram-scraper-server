@@ -2,7 +2,6 @@
 
 from fastapi import Header, HTTPException, Depends
 from typing import Annotated
-from pathlib import Path
 from telethon import TelegramClient
 
 from ..config import ServerConfig

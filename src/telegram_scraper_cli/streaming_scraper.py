@@ -6,13 +6,11 @@ import sqlite3
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import AsyncIterator, List, Optional, Tuple
+from typing import AsyncIterator, List, Optional
 from pathlib import Path
 
 from telethon import TelegramClient
 from telethon.tl.types import (
-    MessageMediaPhoto,
-    MessageMediaDocument,
     MessageMediaWebPage,
     User,
     PeerChannel,

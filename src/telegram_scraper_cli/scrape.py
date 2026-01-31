@@ -2,9 +2,8 @@ import sqlite3
 import asyncio
 import warnings
 import logging
-import sys
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Any, Tuple, Literal
+from typing import Optional, Literal
 from pathlib import Path
 from datetime import datetime, timezone
 import json
@@ -16,17 +15,11 @@ from telethon.tl.types import (
     MessageMediaWebPage,
     User,
     PeerChannel,
-    PeerChat,
-    Channel,
-    Chat,
     Message,
 )
-from telethon.errors import FloodWaitError, SessionPasswordNeededError
+from telethon.errors import FloodWaitError
 from tqdm.asyncio import tqdm as atqdm
 from tqdm import tqdm
-from dotenv import load_dotenv
-import os
-from .authenticate import authorize_telegram_client
 from . import db_helper
 
 

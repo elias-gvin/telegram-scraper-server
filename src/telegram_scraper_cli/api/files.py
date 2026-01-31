@@ -4,7 +4,6 @@ from fastapi import APIRouter, Path, HTTPException, Depends
 from fastapi.responses import FileResponse
 from typing import Annotated
 from pathlib import Path as FilePath
-import sqlite3
 
 from .auth import get_authenticated_user
 from ..config import ServerConfig

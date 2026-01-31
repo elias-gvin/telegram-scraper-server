@@ -3,7 +3,6 @@
 import argparse
 import logging
 from pathlib import Path
-from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI

@@ -1,15 +1,10 @@
 import logging
-import os
-import sys
 from typing import List, Optional, Literal
 from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat
-import asyncio
-from dotenv import load_dotenv
 from rapidfuzz import fuzz
 from dataclasses import dataclass
 
-from .authenticate import authorize_telegram_client
 
 logger = logging.getLogger(__name__)
 

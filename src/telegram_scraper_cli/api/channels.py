@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Query, Depends, HTTPException
 from typing import Annotated, Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from enum import Enum
 from difflib import SequenceMatcher
 from telethon import TelegramClient
