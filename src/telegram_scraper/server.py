@@ -82,7 +82,7 @@ def create_app(config: ServerConfig) -> FastAPI:
     return app
 
 
-# For development with uvicorn CLI (e.g., uvicorn telegram_scraper_cli.server:app --reload)
+# For development with uvicorn CLI (e.g., uvicorn telegram_scraper.server:app --reload)
 # Configure via environment variables. Use tgsc-server for config file support.
 app = create_app(load_config())
 

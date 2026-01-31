@@ -5,7 +5,7 @@
       "name": "Debug FastAPI Server",
       "type": "debugpy",
       "request": "launch",
-      "module": "telegram_scraper_cli.server",
+      "module": "telegram_scraper.server",
       "args": [
         "--config",
         "config.yaml"
@@ -20,7 +20,7 @@
       "name": "Debug FastAPI Server (Debug Log Level)",
       "type": "debugpy",
       "request": "launch",
-      "module": "telegram_scraper_cli.server",
+      "module": "telegram_scraper.server",
       "args": [
         "--config",
         "config.yaml"
@@ -38,7 +38,7 @@
       "request": "launch",
       "module": "uvicorn",
       "args": [
-        "telegram_scraper_cli.server:app",
+        "telegram_scraper.server:app",
         "--reload",
         "--host",
         "0.0.0.0",

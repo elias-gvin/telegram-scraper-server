@@ -19,7 +19,7 @@ FastAPI-based server for scraping and caching Telegram messages with streaming s
 
 ```bash
 # Clone the repository
-cd telegram_scraper_cli
+cd telegram_scraper
 
 # Install with pip
 pip install -e .
@@ -168,7 +168,7 @@ tgsc-server \
 ### Run in development mode
 
 ```bash
-uvicorn telegram_scraper_cli.server:app --reload --host 0.0.0.0 --port 8000
+uvicorn telegram_scraper.server:app --reload --host 0.0.0.0 --port 8000
 ```
 
 > **Note:** When using `uvicorn` directly, the server will use environment variables instead of `config.yaml`. Set `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, etc. as environment variables, or use `tgsc-server --config config.yaml` to load from the config file.
