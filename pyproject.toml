@@ -1,7 +1,7 @@
 [project]
-name = "telegram-scraper-cli"
-version = "0.1.0"
-description = ""
+name = "telegram-scraper-api"
+version = "0.2.0"
+description = "FastAPI server for scraping and caching Telegram messages with smart gap detection"
 authors = [
     {name = "Oleksandr Detilie",email = "oleksandr@neocybernetica.com"}
 ]
@@ -9,18 +9,13 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "Telethon==1.40.0",
-    "tqdm>=4.66.0",
     "python-dotenv>=1.0.0",
-    "qrcode>=7.0.0",
-    "rapidfuzz>=3.0.0",
-    "click>=8.1.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "pyyaml>=6.0.0",
 ]
 
 [project.scripts]
-tgsc = "telegram_scraper_cli.tgsc:main"
 tgsc-server = "telegram_scraper_cli.server:main"
 tgsc-auth = "telegram_scraper_cli.authenticate:main"
 

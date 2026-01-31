@@ -1,22 +1,17 @@
-# Telegram Scraper CLI & API
+# Telegram Scraper API
 
-A comprehensive Telegram channel and group message downloader with both CLI and API server interfaces.
+FastAPI-based server for scraping and caching Telegram messages with intelligent gap detection and streaming support.
 
 ## Features
 
-### CLI Tool
-- 📥 Download messages from Telegram channels and groups
-- 💾 SQLite-based caching for efficient data management
-- 🔍 Search and filter messages
-- 📤 Export to CSV/JSON formats
-
-### API Server (NEW!)
-- 🚀 RESTful API with FastAPI
-- 📡 Real-time streaming with Server-Sent Events (SSE)
-- 💾 Smart caching - downloads only missing data
-- 🎯 Media file serving with UUID-based access
-- 🔐 Header-based authentication
-- ⚙️ Flexible configuration (YAML/ENV/CLI)
+- 🚀 **RESTful API** with FastAPI
+- 📡 **Real-time streaming** via Server-Sent Events (SSE)
+- 💾 **Smart caching** - downloads only missing data, serves cached content instantly
+- 📦 **Chunked delivery** - configurable batch sizes for efficient data transfer
+- 🔐 **Header-based authentication** - simple X-Telegram-Username header
+- 🎯 **Media support** - download and serve media files with UUID-based access
+- 📊 **SQLite caching** - persistent message and media storage with atomic commits
+- ⚙️ **Flexible configuration** - YAML, environment variables, or CLI parameters
 
 ## Quick Start
 
@@ -24,47 +19,29 @@ A comprehensive Telegram channel and group message downloader with both CLI and 
 
 ```bash
 # Clone the repository
-git clone <repo-url>
 cd telegram_scraper_cli
 
 # Install with pip
 pip install -e .
-
-# Or with poetry
-poetry install
 ```
 
 ### Prerequisites
 
-You must obtain Telegram API credentials:
+Get Telegram API credentials:
 1. Visit https://my.telegram.org/apps
 2. Log in with your phone number
 3. Create a new application
 4. Note your `api_id` and `api_hash`
 
-## Usage
+### Setup
 
-### 1. CLI Tool
+**1. Create configuration file:**
 
 ```bash
-# Authenticate
-tgsc auth --username your_username
-
-# Scrape messages
-tgsc scrape --channel-id -1001234567890 --start-date 2024-01-01 --end-date 2024-01-31
-
-# Search messages
-tgsc search --query "keyword" --channel-id -1001234567890
-
-# Export to CSV
-tgsc export --channel-id -1001234567890 --format csv --output messages.csv
+cp config.example.yaml config.yaml
 ```
 
-### 2. API Server
-
-#### Step 1: Configure
-
-Create `config.yaml`:
+Edit `config.yaml`:
 
 ```yaml
 api_id: "YOUR_API_ID"
@@ -77,44 +54,104 @@ host: "0.0.0.0"
 port: 8000
 ```
 
-#### Step 2: Authenticate Users
+**2. Authenticate a user:**
 
 ```bash
 tgsc-auth john_doe --config config.yaml
 ```
 
-#### Step 3: Start Server
+Follow the prompts to enter your phone and verification code.
+
+**3. Start the server:**
 
 ```bash
 tgsc-server --config config.yaml
 ```
 
-#### Step 4: Use API
+**4. Test the API:**
 
 ```bash
 # Find channels
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v1/find-channels?search_by=username&query=durov"
+  "http://localhost:8000/api/v1/find-channels?search_by=username&query=telegram"
 
-# Get message history (streaming)
+# Get message history
 curl -H "X-Telegram-Username: john_doe" \
   "http://localhost:8000/api/v1/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250"
 
-# Download media file
+# Download media
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v1/files/abc-123-uuid" -o media.jpg
+  "http://localhost:8000/api/v1/files/abc-123-uuid" -o photo.jpg"
 ```
 
 Visit `http://localhost:8000/docs` for interactive API documentation.
 
-## Documentation
+## API Endpoints
 
-- [Server Documentation](SERVER_README.md) - Complete API server guide
-- [API Reference](http://localhost:8000/docs) - Interactive API docs (when server is running)
+### 1. Find Channels
+
+```http
+GET /api/v1/find-channels?search_by={criteria}&query={query}
+Header: X-Telegram-Username: your_username
+```
+
+Search for channels by username, ID, or title.
+
+### 2. Message History
+
+```http
+GET /api/v1/history/{channel_id}?start_date={date}&end_date={date}&chunk_size={size}
+Header: X-Telegram-Username: your_username
+```
+
+Stream message history with smart caching:
+- `chunk_size=250` - Stream in chunks (Server-Sent Events)
+- `chunk_size=0` - Return all messages at once
+- `force_refresh=true` - Bypass cache and re-download
+
+### 3. Media Files
+
+```http
+GET /api/v1/files/{uuid}
+Header: X-Telegram-Username: your_username
+```
+
+Download media file by UUID (provided in message response).
+
+## Architecture
+
+### Smart Caching System
+
+The server intelligently manages cache:
+
+1. **First Request**: Downloads from Telegram → Saves to SQLite → Returns to client
+2. **Subsequent Requests**: 
+   - Checks cache for date range
+   - Downloads only missing gaps
+   - Returns combined results (cache + new data)
+3. **Atomic Commits**: Each batch commits atomically - no partial data on errors
+
+### Two-Buffer Streaming
+
+- **Telegram batch** (configurable): Internal download chunks
+- **Client batch** (per-request): API response chunks
+- Independent sizes for optimal performance
+
+### Database Schema
+
+- `messages` - Message content and metadata
+- `media_files` - UUID → file path mapping
+- `channels` - Channel information
+
+**No gaps guarantee**: If data exists for a range in cache, it's complete and valid.
 
 ## Configuration
 
-### YAML Configuration
+### Priority
+
+`CLI Parameters > Environment Variables > YAML > Defaults`
+
+### YAML (`config.yaml`)
 
 ```yaml
 api_id: "YOUR_API_ID"
@@ -139,11 +176,20 @@ export MAX_MEDIA_SIZE_MB=50
 
 ### CLI Parameters
 
-All settings can be overridden via CLI:
-
 ```bash
-tgsc-server --api-id YOUR_ID --api-hash YOUR_HASH --port 9000
+tgsc-server \
+  --api-id YOUR_ID \
+  --api-hash YOUR_HASH \
+  --download-media \
+  --port 8000
 ```
+
+## Documentation
+
+- **[SERVER_README.md](SERVER_README.md)** - Complete server documentation
+- **[QUICKSTART.md](QUICKSTART.md)** - 5-minute setup guide
+- **[CHANGES_ATOMIC_COMMITS.md](CHANGES_ATOMIC_COMMITS.md)** - Database schema details
+- **http://localhost:8000/docs** - Interactive API docs (when running)
 
 ## Project Structure
 
@@ -151,49 +197,95 @@ tgsc-server --api-id YOUR_ID --api-hash YOUR_HASH --port 9000
 telegram_scraper_cli/
 ├── src/telegram_scraper_cli/
 │   ├── api/              # FastAPI routes
-│   │   ├── channels.py   # Channel search endpoint
-│   │   ├── history.py    # Message history endpoint
-│   │   ├── files.py      # Media file serving
-│   │   └── auth.py       # API authentication helpers
+│   │   ├── channels.py   # Channel search
+│   │   ├── history.py    # Message history  
+│   │   ├── files.py      # Media serving
+│   │   └── auth.py       # Authentication
 │   ├── server.py         # FastAPI server
-│   ├── config.py         # Configuration management
-│   ├── streaming_scraper.py  # Cache-aware streaming
-│   ├── scrape.py         # Core scraping logic
-│   ├── db_helper.py      # Database utilities
-│   └── authenticate.py   # Authentication & CLI tool
+│   ├── authenticate.py   # Auth CLI tool
+│   ├── config.py         # Configuration
+│   ├── scraper.py        # Cache-aware scraping
+│   ├── models.py         # Data models
+│   ├── media_downloader.py  # Media download logic
+│   └── db_helper.py      # Database utilities
 ├── config.example.yaml   # Example configuration
-├── SERVER_README.md      # Detailed server docs
 └── README.md            # This file
 ```
 
-## Architecture
+## JavaScript Client Example
 
-### Smart Caching System
+```javascript
+const API_BASE = 'http://localhost:8000/api/v1';
+const USERNAME = 'john_doe';
 
-The server uses an intelligent caching system:
+// Stream messages
+const es = new EventSource(
+  `${API_BASE}/history/123?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250`
+);
 
-1. **First Request**: Downloads from Telegram → Saves to SQLite → Returns to client
-2. **Subsequent Requests**: 
-   - Checks cache for date range
-   - Downloads only missing gaps
-   - Returns combined results (cache + new data)
+es.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  data.messages.forEach(msg => {
+    displayMessage(msg);
+    
+    // Download media if present
+    if (msg.media_uuid) {
+      fetchMedia(msg.media_uuid);
+    }
+  });
+};
 
-### Database Schema
+async function fetchMedia(uuid) {
+  const response = await fetch(`${API_BASE}/files/${uuid}`, {
+    headers: { 'X-Telegram-Username': USERNAME }
+  });
+  const blob = await response.blob();
+  // Display media...
+}
+```
 
-- `messages` - Message content and metadata
-- `media_files` - UUID → file path mapping
-- `channels` - Channel information
-- `scrape_runs` - Scraping history and statistics
+## Development
 
-## Development Status
+### Run in development mode
 
-⚠️ **This project is not production-ready. Use with caution.**
+```bash
+uvicorn telegram_scraper_cli.server:app --reload --host 0.0.0.0 --port 8000
+```
 
-## Acknowledgement
+### Check linting
 
-This repository was built based on:
-https://github.com/unnohwn/telegram-scraper
+```bash
+ruff check src/
+```
+
+## Troubleshooting
+
+### "User not authenticated"
+
+Authenticate first:
+
+```bash
+tgsc-auth your_username --config config.yaml
+```
+
+### "Missing X-Telegram-Username header"
+
+All API requests require this header:
+
+```bash
+curl -H "X-Telegram-Username: your_username" ...
+```
+
+### Port already in use
+
+```bash
+tgsc-server --port 9000
+```
 
 ## License
 
 [Your License Here]
+
+## Acknowledgement
+
+Built based on: https://github.com/unnohwn/telegram-scraper

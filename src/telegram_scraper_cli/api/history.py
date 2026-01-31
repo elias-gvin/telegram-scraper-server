@@ -13,7 +13,7 @@ from telethon import TelegramClient
 from .auth import get_telegram_client
 from ..config import ServerConfig
 from .. import db_helper
-from ..streaming_scraper import stream_messages_with_cache
+from ..scraper import stream_messages_with_cache
 
 
 router = APIRouter(prefix="/api/v1", tags=["history"])

@@ -1,10 +1,9 @@
-"""Streaming scraper with cache-aware gap detection."""
+"""Cache-aware message scraper for Telegram."""
 
 from __future__ import annotations
 
 import sqlite3
 import logging
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import AsyncIterator, List, Optional
 from pathlib import Path
@@ -17,25 +16,11 @@ from telethon.tl.types import (
 )
 
 from . import db_helper
-from .scrape import MessageData, OptimizedTelegramScraper
+from .models import MessageData, DateRange, TimelineSegment
+from .media_downloader import download_media
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class DateRange:
-    """Date range with start and end."""
-    start: datetime
-    end: datetime
-
-
-@dataclass
-class TimelineSegment:
-    """Timeline segment marking cache or download region."""
-    start: datetime
-    end: datetime
-    source: str  # "cache" or "telegram"
 
 
 def merge_overlapping_ranges(ranges: List[DateRange]) -> List[DateRange]:
@@ -178,18 +163,12 @@ async def download_from_telegram_batched(
             
             # Download media if requested
             if scrape_media and message.media and not isinstance(message.media, MessageMediaWebPage):
-                # Use the existing download logic from OptimizedTelegramScraper
-                scraper = OptimizedTelegramScraper(
-                    client=client,
-                    db_connection=conn,
-                    scrape_params=type('Params', (), {
-                        'scrape_media': True,
-                        'output_dir': output_dir,
-                        'channel_id': channel_id,
-                        'max_media_size_mb': max_media_size_mb,
-                    })()
+                result = await download_media(
+                    message,
+                    output_dir=output_dir,
+                    channel_id=channel_id,
+                    max_media_size_mb=max_media_size_mb,
                 )
-                result = await scraper._download_media(message)
                 if result.status == "downloaded" and result.path:
                     media_path = result.path
                     try:
@@ -218,12 +197,10 @@ async def download_from_telegram_batched(
                 media_uuid = db_helper.store_media_with_uuid(
                     conn, message.id, media_path, file_size=media_size
                 )
-                # Attach UUID to message data (we'll need to extend MessageData for this)
                 msg_data.media_uuid = media_uuid
             else:
                 msg_data.media_uuid = None
             
-            # Also add media_size to MessageData
             msg_data.media_size = media_size
             
             batch.append(msg_data)
@@ -404,8 +381,8 @@ async def stream_messages_with_cache(
                         "username": msg.username,
                         "message": msg.message,
                         "media_type": msg.media_type,
-                        "media_uuid": getattr(msg, 'media_uuid', None),
-                        "media_size": getattr(msg, 'media_size', None),
+                        "media_uuid": msg.media_uuid,
+                        "media_size": msg.media_size,
                         "reply_to": msg.reply_to,
                         "post_author": msg.post_author,
                         "is_forwarded": msg.is_forwarded,
