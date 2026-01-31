@@ -186,10 +186,9 @@ tgsc-server \
 
 ## Documentation
 
-- **[SERVER_README.md](SERVER_README.md)** - Complete server documentation
-- **[QUICKSTART.md](QUICKSTART.md)** - 5-minute setup guide
-- **[CHANGES_ATOMIC_COMMITS.md](CHANGES_ATOMIC_COMMITS.md)** - Database schema details
-- **http://localhost:8000/docs** - Interactive API docs (when running)
+- **[Complete Guide](GUIDE.md)** - Setup, API reference, examples, troubleshooting
+- **[Interactive API Docs](http://localhost:8000/docs)** - Swagger UI (when server is running)
+- **[Database Schema](CHANGES_ATOMIC_COMMITS.md)** - Technical details on atomic commits
 
 ## Project Structure
 
