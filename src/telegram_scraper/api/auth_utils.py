@@ -53,14 +53,17 @@ async def get_authenticated_user(
 
 async def get_telegram_client(
     username: str = Depends(get_authenticated_user),
-) -> TelegramClient:
+):
     """
     Get Telegram client for authenticated user.
+
+    This is an async generator dependency that automatically handles
+    client cleanup after the request completes.
 
     Args:
         username: Authenticated username (from dependency)
 
-    Returns:
+    Yields:
         Connected and authorized TelegramClient
 
     Raises:
@@ -74,13 +77,19 @@ async def get_telegram_client(
     session_path = str(_config.sessions_path / username)
 
     client = TelegramClient(session_path, _config.api_id, _config.api_hash)
-    await client.connect()
 
-    if not await client.is_user_authorized():
-        await client.disconnect()
-        raise HTTPException(
-            status_code=401,
-            detail=f"Telegram session for '{username}' is not authorized",
-        )
+    try:
+        await client.connect()
 
-    return client
+        if not await client.is_user_authorized():
+            raise HTTPException(
+                status_code=401,
+                detail=f"Telegram session for '{username}' is not authorized",
+            )
+
+        yield client
+
+    finally:
+        # Always disconnect the client after request completes
+        if client.is_connected():
+            await client.disconnect()

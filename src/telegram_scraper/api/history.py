@@ -187,10 +187,8 @@ async def get_history(
                     ):
                         yield f"data: {json.dumps({'messages': batch})}\n\n"
                 finally:
-                    # Cleanup
+                    # Cleanup database connection
                     conn.close()
-                    if client.is_connected():
-                        await client.disconnect()
 
             return StreamingResponse(event_stream(), media_type="text/event-stream")
 

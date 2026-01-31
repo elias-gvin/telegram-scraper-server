@@ -79,55 +79,45 @@ async def find_channels(
 
     Requires X-Telegram-Username header for authentication.
     """
-    try:
-        if search_by == SearchBy.channel_id:
-            # Direct lookup by ID
-            try:
-                channel_id = int(query)
-                entity = await client.get_entity(channel_id)
-                return [entity_to_channel_info(entity)]
-            except ValueError:
-                raise HTTPException(
-                    status_code=400, detail=f"Invalid channel ID: {query}"
-                )
-            except Exception as e:
-                raise HTTPException(status_code=404, detail=f"Channel not found: {e}")
+    if search_by == SearchBy.channel_id:
+        # Direct lookup by ID
+        try:
+            channel_id = int(query)
+            entity = await client.get_entity(channel_id)
+            return [entity_to_channel_info(entity)]
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid channel ID: {query}")
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Channel not found: {e}")
 
-        elif search_by == SearchBy.username:
-            # Lookup by username
-            try:
-                entity = await client.get_entity(query)
-                return [entity_to_channel_info(entity)]
-            except Exception as e:
-                raise HTTPException(status_code=404, detail=f"Channel not found: {e}")
+    elif search_by == SearchBy.username:
+        # Lookup by username
+        try:
+            entity = await client.get_entity(query)
+            return [entity_to_channel_info(entity)]
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Channel not found: {e}")
 
-        elif search_by == SearchBy.title:
-            # Fuzzy search in user's dialogs
-            channels = []
-            async for dialog in client.iter_dialogs():
-                entity = dialog.entity
+    elif search_by == SearchBy.title:
+        # Fuzzy search in user's dialogs
+        channels = []
+        async for dialog in client.iter_dialogs():
+            entity = dialog.entity
 
-                # Skip system dialog (Telegram Service Notifications)
-                is_system_dialog = dialog.id == 777000
-                # Only include channels and chats/groups
-                is_channel_or_chat = isinstance(entity, Channel) or isinstance(
-                    entity, Chat
-                )
+            # Skip system dialog (Telegram Service Notifications)
+            is_system_dialog = dialog.id == 777000
+            # Only include channels and chats/groups
+            is_channel_or_chat = isinstance(entity, Channel) or isinstance(entity, Chat)
 
-                if is_system_dialog or not is_channel_or_chat:
-                    continue
+            if is_system_dialog or not is_channel_or_chat:
+                continue
 
-                score = fuzzy_match_score(dialog.title, query)
-                if score >= title_threshold:
-                    channels.append(entity_to_channel_info(dialog.entity))
+            score = fuzzy_match_score(dialog.title, query)
+            if score >= title_threshold:
+                channels.append(entity_to_channel_info(dialog.entity))
 
-            # Sort by match score (best matches first)
-            channels.sort(key=lambda c: fuzzy_match_score(c.title, query), reverse=True)
-            return channels
+        # Sort by match score (best matches first)
+        channels.sort(key=lambda c: fuzzy_match_score(c.title, query), reverse=True)
+        return channels
 
-        return []
-
-    finally:
-        # Clean up client connection
-        if client.is_connected():
-            await client.disconnect()
+    return []
