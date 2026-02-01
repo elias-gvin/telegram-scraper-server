@@ -215,6 +215,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# VSCode
+.vscode/
+
 # Sessions and output directories
 *.session
 sessions/
