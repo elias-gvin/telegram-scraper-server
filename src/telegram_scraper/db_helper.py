@@ -92,6 +92,7 @@ def open_channel_db(
     paths.channel_dir.mkdir(parents=True, exist_ok=True)
     # media_dir creation is optional; scraper may create lazily
     conn = sqlite3.connect(str(paths.db_file), check_same_thread=check_same_thread)
+    configure_connection(conn)
     return conn
 
 
@@ -106,7 +107,7 @@ def open_db_file(db_file: Path, *, row_factory: bool = True) -> sqlite3.Connecti
     if row_factory:
         conn.row_factory = sqlite3.Row
     # Keep behavior consistent with the rest of the app.
-    conn.execute("PRAGMA foreign_keys=ON")
+    configure_connection(conn)
     return conn
 
 
