@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 def transform_message_to_response(msg_dict: dict) -> dict:
     """
     Transform flat message dict to nested response format.
-    
+
     Converts flat media fields (media_type, media_uuid, media_size, media_filename)
     into nested media object. Also removes internal database fields.
     """
@@ -34,13 +34,13 @@ def transform_message_to_response(msg_dict: dict) -> dict:
     msg_dict.pop("id", None)
     msg_dict.pop("channel_id", None)
     msg_dict.pop("media_path", None)
-    
+
     # Extract media fields
     media_type = msg_dict.pop("media_type", None)
     media_uuid = msg_dict.pop("media_uuid", None)
     media_size = msg_dict.pop("media_size", None)
     media_filename = msg_dict.pop("media_filename", None)
-    
+
     # Create nested media object if media exists
     if media_type and media_uuid and media_filename and media_size is not None:
         msg_dict["media"] = {
@@ -51,7 +51,7 @@ def transform_message_to_response(msg_dict: dict) -> dict:
         }
     else:
         msg_dict["media"] = None
-    
+
     return msg_dict
 
 
@@ -249,7 +249,10 @@ async def download_from_telegram_batched(
                     for msg in batch:
                         if msg.media_path:
                             msg.media_uuid = db_helper.store_media_with_uuid(
-                                conn, msg.message_id, msg.media_path, file_size=msg.media_size
+                                conn,
+                                msg.message_id,
+                                msg.media_path,
+                                file_size=msg.media_size,
                             )
                     conn.commit()
                 except Exception as e:
@@ -384,7 +387,7 @@ async def stream_messages_with_cache(
             cached_range = DateRange(cached_start, cached_end)
         else:
             cached_range = None
-        
+
         requested = DateRange(start_date, end_date)
 
         gaps = find_gaps(requested, cached_range)
@@ -412,7 +415,7 @@ async def stream_messages_with_cache(
                         media_uuid = db_helper.get_media_uuid_by_message_id(
                             conn, msg_dict["message_id"]
                         )
-                        
+
                         if media_uuid:
                             media_info = db_helper.get_media_info_by_uuid(
                                 conn, media_uuid
@@ -465,7 +468,7 @@ async def stream_messages_with_cache(
                     media_filename = None
                     if msg.media_path:
                         media_filename = Path(msg.media_path).name
-                    
+
                     msg_dict = {
                         "message_id": msg.message_id,
                         "date": msg.date,

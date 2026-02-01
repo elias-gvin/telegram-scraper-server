@@ -100,12 +100,16 @@ def parse_date(date_str: str) -> datetime:
 async def get_history(
     channel_id: Annotated[int, Path(description="Channel ID")],
     start_date: Annotated[
-        Optional[str], 
-        Query(description="Start date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to chat beginning")
+        Optional[str],
+        Query(
+            description="Start date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to chat beginning"
+        ),
     ] = None,
     end_date: Annotated[
-        Optional[str], 
-        Query(description="End date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to now")
+        Optional[str],
+        Query(
+            description="End date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to now"
+        ),
     ] = None,
     chunk_size: Annotated[
         int,
@@ -134,7 +138,7 @@ async def get_history(
             # FIXME: Ugly vibe-coded approach to handle very old messages. Fix it
             # Default to beginning of Telegram (or a very early date)
             start_dt = datetime(2013, 1, 1, tzinfo=timezone.utc)
-        
+
         if end_date:
             end_dt = parse_date(end_date)
         else:

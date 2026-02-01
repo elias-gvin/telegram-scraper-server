@@ -1,6 +1,7 @@
 """Data models for Telegram Scraper."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 
@@ -30,14 +31,14 @@ class MessageData:
 class DateRange:
     """Date range with start and end."""
 
-    start: "datetime"  # type: ignore
-    end: "datetime"  # type: ignore
+    start: datetime
+    end: datetime
 
 
 @dataclass
 class TimelineSegment:
     """Timeline segment marking cache or download region."""
 
-    start: "datetime"  # type: ignore
-    end: "datetime"  # type: ignore
+    start: datetime
+    end: datetime
     source: str  # "cache" or "telegram"

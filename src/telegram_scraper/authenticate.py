@@ -285,7 +285,7 @@ async def authenticate_user_cli(
             show_user_info=True,
         )
 
-        click.echo(f"\n✅ You can now use this session with:")
+        click.echo("\n✅ You can now use this session with:")
         click.secho(f"   X-Telegram-Username: {username}", fg="cyan")
         click.echo()
 

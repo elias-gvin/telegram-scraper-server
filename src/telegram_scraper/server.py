@@ -34,6 +34,7 @@ async def lifespan(app: FastAPI):
     await api_auth.cleanup_clients()
     logger.info("Cleanup complete")
 
+
 def create_app(config: ServerConfig) -> FastAPI:
     """
     Create and configure FastAPI application.
@@ -235,7 +236,7 @@ def main(
         if server_config.max_media_size_mb:
             logger.info(f"Max media size: {server_config.max_media_size_mb} MB")
         else:
-            logger.info(f"Max media size: unlimited")
+            logger.info("Max media size: unlimited")
     logger.info(f"Telegram batch size: {server_config.telegram_batch_size}")
     logger.info(f"Output path: {server_config.output_path}")
     logger.info(f"Sessions path: {server_config.sessions_path}")
@@ -254,4 +255,4 @@ def main(
 # For development with uvicorn CLI (e.g., uvicorn telegram_scraper.server:app --reload)
 # Configure via environment variables. Use tgsc-server for config file support.
 if __name__ != "__main__":
-   app = create_app(load_config())
+    app = create_app(load_config())

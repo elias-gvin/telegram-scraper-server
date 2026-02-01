@@ -101,11 +101,11 @@ async def get_telegram_client(
                     # Session expired, remove from pool
                     await client.disconnect()
                     del _client_pool[username]
-        
+
         # Create new client
         session_path = str(_config.sessions_path / username)
         client = TelegramClient(session_path, _config.api_id, _config.api_hash)
-        
+
         try:
             await client.connect()
 
@@ -117,10 +117,10 @@ async def get_telegram_client(
 
             # Add to pool for reuse
             _client_pool[username] = client
-            
+
             yield client
 
-        except Exception as e:
+        except Exception:
             # On error, disconnect and don't add to pool
             if client.is_connected():
                 await client.disconnect()
@@ -130,7 +130,7 @@ async def get_telegram_client(
 async def cleanup_clients():
     """
     Cleanup all pooled Telegram clients.
-    
+
     Should be called on server shutdown to gracefully disconnect all clients.
     """
     for username, client in list(_client_pool.items()):

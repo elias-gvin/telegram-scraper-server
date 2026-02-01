@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 import csv
 import json
+import mimetypes
+import uuid as uuid_lib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
@@ -82,7 +84,7 @@ def ensure_channel_directories(
 ) -> ChannelDbPaths:
     """
     Create the channel directory structure if it doesn't exist.
-    
+
     Returns:
         ChannelDbPaths with all canonical paths for the channel.
     """
@@ -101,7 +103,7 @@ def open_database(
 ) -> sqlite3.Connection:
     """
     Open a SQLite database connection.
-    
+
     Args:
         db_path: Path to database file
         create_if_missing: If True, creates database if it doesn't exist.
@@ -110,18 +112,18 @@ def open_database(
                     If False, returns raw tuples (slightly faster).
         check_same_thread: SQLite thread safety setting. Set to False for async/
                           multi-threaded usage (FastAPI). Default True for safety.
-    
+
     Returns:
         Configured sqlite3.Connection. Caller owns lifecycle (must close()).
     """
     if not create_if_missing and not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
-    
+
     conn = sqlite3.connect(str(db_path), check_same_thread=check_same_thread)
-    
+
     if row_factory:
         conn.row_factory = sqlite3.Row
-    
+
     configure_connection(conn)
     return conn
 
@@ -484,9 +486,6 @@ def check_db_connection(conn: sqlite3.Connection) -> bool:
 # ============================================================================
 # Media UUID Management
 # ============================================================================
-
-import uuid as uuid_lib
-import mimetypes
 
 
 def generate_media_uuid() -> str:
