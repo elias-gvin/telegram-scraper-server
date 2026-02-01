@@ -14,6 +14,8 @@ from .api import auth_utils as api_auth
 from .api import history as api_history
 from .api import files as api_files
 
+from contextlib import asynccontextmanager
+
 
 # Configure logging
 logging.basicConfig(
@@ -21,6 +23,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for FastAPI application.
+    """
+    yield
+    logger.info("Shutting down server, cleaning up Telegram clients...")
+    await api_auth.cleanup_clients()
+    logger.info("Cleanup complete")
 
 def create_app(config: ServerConfig) -> FastAPI:
     """
@@ -38,6 +50,7 @@ def create_app(config: ServerConfig) -> FastAPI:
         version="1.0.0",
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     # CORS middleware (adjust origins as needed)
@@ -77,13 +90,6 @@ def create_app(config: ServerConfig) -> FastAPI:
     async def health():
         """Health check endpoint."""
         return {"status": "healthy"}
-
-    @app.on_event("shutdown")
-    async def shutdown_event():
-        """Cleanup resources on server shutdown."""
-        logger.info("Shutting down server, cleaning up Telegram clients...")
-        await api_auth.cleanup_clients()
-        logger.info("Cleanup complete")
 
     return app
 
