@@ -1,33 +1,27 @@
-[project]
+[tool.poetry]
 name = "telegram-scraper-api"
 version = "0.2.0"
 description = "FastAPI server for scraping and caching Telegram messages with smart gap detection"
-authors = [
-    {name = "Oleksandr Detilie",email = "oleksandr@neocybernetica.com"}
-]
+authors = ["Oleksandr Detilie <al.detillier@gmail.com>"]
 readme = "README.md"
-requires-python = ">=3.12,<4.0"
-dependencies = [
-    "Telethon==1.40.0",
-    "qrcode>=8.2.0",
-    "python-dotenv>=1.0.0",
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
-    "pyyaml>=6.0.0",
-    "click>=8.0.0",
-]
+packages = [{include = "telegram_scraper", from = "src"}]
 
-[project.scripts]
+[tool.poetry.dependencies]
+python = ">=3.12,<4.0"
+Telethon = "1.40.0"
+qrcode = ">=8.2.0"
+python-dotenv = ">=1.0.0"
+fastapi = ">=0.115.0"
+uvicorn = {extras = ["standard"], version = ">=0.32.0"}
+pyyaml = ">=6.0.0"
+click = ">=8.0.0"
+
+[tool.poetry.group.dev.dependencies]
+ruff = ">=0.14.10"
+
+[tool.poetry.scripts]
 tgsc-server = "telegram_scraper.server:main"
 tgsc-auth = "telegram_scraper.authenticate:main"
-
-[project.optional-dependencies]
-dev = [
-    "ruff>=0.14.10",
-]
-
-[tool.poetry]
-packages = [{include = "telegram_scraper", from = "src"}]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
