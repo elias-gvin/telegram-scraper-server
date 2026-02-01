@@ -146,10 +146,12 @@ async def get_history(
                 status_code=400, detail="start_date must be before end_date"
             )
 
-        # Open/create channel database
-        conn = db_helper.open_channel_db(
-            output_dir=_config.output_path,
-            channel_id=channel_id,
+        # Ensure channel directory structure and open database
+        paths = db_helper.ensure_channel_directories(_config.output_path, channel_id)
+        conn = db_helper.open_database(
+            paths.db_file,
+            create_if_missing=True,
+            row_factory=True,
             check_same_thread=False,
         )
 

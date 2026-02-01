@@ -77,36 +77,51 @@ def channel_db_paths(output_dir: Path, channel_id: str | int) -> ChannelDbPaths:
     return ChannelDbPaths(channel_dir=channel_dir, db_file=db_file, media_dir=media_dir)
 
 
-def open_channel_db(
-    *,
-    output_dir: Path,
-    channel_id: str | int,
-    check_same_thread: bool = False,
-) -> sqlite3.Connection:
+def ensure_channel_directories(
+    output_dir: Path, channel_id: str | int
+) -> ChannelDbPaths:
     """
-    Open (and create if needed) the channel SQLite database connection.
-
-    Note: returns a raw sqlite3.Connection; callers own lifecycle (close()).
+    Create the channel directory structure if it doesn't exist.
+    
+    Returns:
+        ChannelDbPaths with all canonical paths for the channel.
     """
     paths = channel_db_paths(output_dir, channel_id)
     paths.channel_dir.mkdir(parents=True, exist_ok=True)
-    # media_dir creation is optional; scraper may create lazily
-    conn = sqlite3.connect(str(paths.db_file), check_same_thread=check_same_thread)
-    configure_connection(conn)
-    return conn
+    paths.media_dir.mkdir(parents=True, exist_ok=True)
+    return paths
 
 
-def open_db_file(db_file: Path, *, row_factory: bool = True) -> sqlite3.Connection:
+def open_database(
+    db_path: Path,
+    *,
+    create_if_missing: bool = True,
+    row_factory: bool = True,
+    check_same_thread: bool = True,
+) -> sqlite3.Connection:
     """
-    Open an existing SQLite DB file (generic helper).
-
-    This is intentionally separate from `open_channel_db()` because it doesn't assume
-    any on-disk layout and is useful for tooling like exports.
+    Open a SQLite database connection.
+    
+    Args:
+        db_path: Path to database file
+        create_if_missing: If True, creates database if it doesn't exist.
+                          If False, raises FileNotFoundError if database doesn't exist.
+        row_factory: If True, use sqlite3.Row for dict-like column access by name.
+                    If False, returns raw tuples (slightly faster).
+        check_same_thread: SQLite thread safety setting. Set to False for async/
+                          multi-threaded usage (FastAPI). Default True for safety.
+    
+    Returns:
+        Configured sqlite3.Connection. Caller owns lifecycle (must close()).
     """
-    conn = sqlite3.connect(str(db_file))
+    if not create_if_missing and not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+    
+    conn = sqlite3.connect(str(db_path), check_same_thread=check_same_thread)
+    
     if row_factory:
         conn.row_factory = sqlite3.Row
-    # Keep behavior consistent with the rest of the app.
+    
     configure_connection(conn)
     return conn
 
@@ -288,7 +303,7 @@ def _export_messages_to_json(
                     f.write(",\n")
                 else:
                     first = False
-                # With `open_db_file(..., row_factory=True)`, rows are sqlite3.Row
+                # With `open_database(..., row_factory=True)`, rows are sqlite3.Row
                 json.dump(dict(row), f, ensure_ascii=False, indent=json_indent)
                 row_count += 1
         f.write("\n]\n")

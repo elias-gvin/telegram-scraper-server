@@ -46,13 +46,18 @@ def find_media_by_uuid(media_uuid: str) -> dict:
         if not channel_dir.is_dir():
             continue
 
-        # Check for database file
-        db_file = channel_dir / f"{channel_dir.name}.db"
-        if not db_file.exists():
+        # Use canonical path helper to get database file
+        paths = db_helper.channel_db_paths(output_path, channel_dir.name)
+        if not paths.db_file.exists():
             continue
 
         try:
-            conn = db_helper.open_db_file(db_file, row_factory=False)
+            conn = db_helper.open_database(
+                paths.db_file,
+                create_if_missing=False,
+                row_factory=False,
+                check_same_thread=True,
+            )
             media_info = db_helper.get_media_info_by_uuid(conn, media_uuid)
             conn.close()
 
