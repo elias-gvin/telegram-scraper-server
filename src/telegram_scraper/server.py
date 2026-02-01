@@ -78,6 +78,13 @@ def create_app(config: ServerConfig) -> FastAPI:
         """Health check endpoint."""
         return {"status": "healthy"}
 
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        """Cleanup resources on server shutdown."""
+        logger.info("Shutting down server, cleaning up Telegram clients...")
+        await api_auth.cleanup_clients()
+        logger.info("Cleanup complete")
+
     return app
 
 
