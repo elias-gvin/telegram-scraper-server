@@ -6,9 +6,10 @@ authors = [
     {name = "Oleksandr Detilie",email = "oleksandr@neocybernetica.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<4.0"
 dependencies = [
     "Telethon==1.40.0",
+    "qrcode>=8.2.0",
     "python-dotenv>=1.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",

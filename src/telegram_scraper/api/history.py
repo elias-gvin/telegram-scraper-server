@@ -30,6 +30,15 @@ def set_config(config: ServerConfig):
     _config = config
 
 
+class MediaInfo(BaseModel):
+    """Media information for a message."""
+
+    type: str
+    uuid: str
+    filename: str
+    size: int
+
+
 class MessageResponse(BaseModel):
     """Message data response model."""
 
@@ -40,9 +49,7 @@ class MessageResponse(BaseModel):
     last_name: str | None
     username: str | None
     message: str
-    media_type: str | None
-    media_uuid: str | None
-    media_size: int | None
+    media: MediaInfo | None
     reply_to: int | None
     post_author: str | None
     is_forwarded: int

@@ -23,6 +23,38 @@ from .media_downloader import download_media
 logger = logging.getLogger(__name__)
 
 
+def transform_message_to_response(msg_dict: dict) -> dict:
+    """
+    Transform flat message dict to nested response format.
+    
+    Converts flat media fields (media_type, media_uuid, media_size, media_filename)
+    into nested media object. Also removes internal database fields.
+    """
+    # Remove internal database fields that shouldn't be in API response
+    msg_dict.pop("id", None)
+    msg_dict.pop("channel_id", None)
+    msg_dict.pop("media_path", None)
+    
+    # Extract media fields
+    media_type = msg_dict.pop("media_type", None)
+    media_uuid = msg_dict.pop("media_uuid", None)
+    media_size = msg_dict.pop("media_size", None)
+    media_filename = msg_dict.pop("media_filename", None)
+    
+    # Create nested media object if media exists
+    if media_type and media_uuid and media_filename and media_size is not None:
+        msg_dict["media"] = {
+            "type": media_type,
+            "uuid": media_uuid,
+            "filename": media_filename,
+            "size": media_size,
+        }
+    else:
+        msg_dict["media"] = None
+    
+    return msg_dict
+
+
 def merge_overlapping_ranges(ranges: List[DateRange]) -> List[DateRange]:
     """Merge overlapping or adjacent date ranges."""
     if not ranges:
@@ -371,30 +403,42 @@ async def stream_messages_with_cache(
                 batch_size=telegram_batch_size,
             ):
                 for row in batch:
-                    # Convert row to dict and add media_uuid
+                    # Convert row to dict and add media info
                     msg_dict = dict(row)
 
                     # Get media UUID if message has media
+                    # Read operations in WAL mode don't block
                     if msg_dict.get("media_type"):
                         media_uuid = db_helper.get_media_uuid_by_message_id(
                             conn, msg_dict["message_id"]
                         )
-                        msg_dict["media_uuid"] = media_uuid
-
-                        # Get media size
+                        
                         if media_uuid:
                             media_info = db_helper.get_media_info_by_uuid(
                                 conn, media_uuid
                             )
-                            msg_dict["media_size"] = (
-                                media_info.get("file_size") if media_info else None
-                            )
+                            if media_info:
+                                msg_dict["media_uuid"] = media_info.get("uuid")
+                                msg_dict["media_size"] = media_info.get("file_size")
+                                file_path = media_info.get("file_path")
+                                msg_dict["media_filename"] = (
+                                    Path(file_path).name if file_path else None
+                                )
+                            else:
+                                msg_dict["media_uuid"] = None
+                                msg_dict["media_size"] = None
+                                msg_dict["media_filename"] = None
                         else:
+                            msg_dict["media_uuid"] = None
                             msg_dict["media_size"] = None
+                            msg_dict["media_filename"] = None
                     else:
                         msg_dict["media_uuid"] = None
                         msg_dict["media_size"] = None
+                        msg_dict["media_filename"] = None
 
+                    # Transform to nested response format
+                    msg_dict = transform_message_to_response(msg_dict)
                     client_buffer.append(msg_dict)
 
                     # Yield when buffer full
@@ -417,6 +461,11 @@ async def stream_messages_with_cache(
             ):
                 # Convert MessageData to dict
                 for msg in telegram_batch:
+                    # Extract filename from media_path if present
+                    media_filename = None
+                    if msg.media_path:
+                        media_filename = Path(msg.media_path).name
+                    
                     msg_dict = {
                         "message_id": msg.message_id,
                         "date": msg.date,
@@ -428,11 +477,14 @@ async def stream_messages_with_cache(
                         "media_type": msg.media_type,
                         "media_uuid": msg.media_uuid,
                         "media_size": msg.media_size,
+                        "media_filename": media_filename,
                         "reply_to": msg.reply_to,
                         "post_author": msg.post_author,
                         "is_forwarded": msg.is_forwarded,
                         "forwarded_from_channel_id": msg.forwarded_from_channel_id,
                     }
+                    # Transform to nested response format
+                    msg_dict = transform_message_to_response(msg_dict)
                     client_buffer.append(msg_dict)
 
                 # Yield when buffer full
