@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 import logging
 from datetime import datetime, timezone
 from typing import AsyncIterator, List, Optional
@@ -14,8 +13,9 @@ from telethon.tl.types import (
     User,
     PeerChannel,
 )
+from sqlmodel import Session
 
-from . import db_helper
+from .database import operations
 from .models import MessageData, DateRange, TimelineSegment
 from .media_downloader import download_media
 
@@ -140,7 +140,7 @@ def build_timeline(
 
 async def download_from_telegram_batched(
     client: TelegramClient,
-    conn: sqlite3.Connection,
+    session: Session,
     channel_id: int,
     start_date: datetime,
     end_date: datetime,
@@ -242,21 +242,20 @@ async def download_from_telegram_batched(
             if len(batch) >= batch_size:
                 # Save batch to DB atomically
                 try:
-                    conn.execute("BEGIN IMMEDIATE")
                     # First insert messages
-                    _batch_insert_messages(conn, batch, channel_id)
+                    _batch_insert_messages(session, batch, channel_id)
                     # Then store media UUIDs (requires messages to exist due to FK)
                     for msg in batch:
                         if msg.media_path:
-                            msg.media_uuid = db_helper.store_media_with_uuid(
-                                conn,
+                            msg.media_uuid = operations.store_media_with_uuid(
+                                session,
                                 msg.message_id,
                                 msg.media_path,
                                 file_size=msg.media_size,
                             )
-                    conn.commit()
+                    session.commit()
                 except Exception as e:
-                    conn.rollback()
+                    session.rollback()
                     logger.error(f"Failed to save batch: {e}")
                     raise
 
@@ -271,18 +270,20 @@ async def download_from_telegram_batched(
     # Yield remaining messages
     if batch:
         try:
-            conn.execute("BEGIN IMMEDIATE")
             # First insert messages
-            _batch_insert_messages(conn, batch, channel_id)
+            _batch_insert_messages(session, batch, channel_id)
             # Then store media UUIDs (requires messages to exist due to FK)
             for msg in batch:
                 if msg.media_path:
-                    msg.media_uuid = db_helper.store_media_with_uuid(
-                        conn, msg.message_id, msg.media_path, file_size=msg.media_size
+                    msg.media_uuid = operations.store_media_with_uuid(
+                        session,
+                        msg.message_id,
+                        msg.media_path,
+                        file_size=msg.media_size,
                     )
-            conn.commit()
+            session.commit()
         except Exception as e:
-            conn.rollback()
+            session.rollback()
             logger.error(f"Failed to save final batch: {e}")
             raise
 
@@ -290,7 +291,7 @@ async def download_from_telegram_batched(
 
 
 def _batch_insert_messages(
-    conn: sqlite3.Connection,
+    session: Session,
     messages: List[MessageData],
     channel_id: str | int,
 ) -> None:
@@ -301,57 +302,20 @@ def _batch_insert_messages(
     if not messages:
         return
 
-    data = [
-        (
-            str(channel_id),
-            int(msg.message_id),
-            str(msg.date),
-            int(msg.sender_id),
-            msg.first_name,
-            msg.last_name,
-            msg.username,
-            str(msg.message),
-            msg.media_type,
-            msg.media_path,
-            msg.reply_to,
-            msg.post_author,
-            int(msg.is_forwarded),
-            msg.forwarded_from_channel_id,
-        )
-        for msg in messages
-    ]
-
-    # Always use INSERT OR REPLACE to handle duplicates
-    conn.executemany(
-        """
-        INSERT INTO messages
-          (channel_id, message_id, date, sender_id, first_name, last_name, username,
-           message, media_type, media_path, reply_to, post_author,
-           is_forwarded, forwarded_from_channel_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(message_id) DO UPDATE SET
-          channel_id=excluded.channel_id,
-          date=excluded.date,
-          sender_id=excluded.sender_id,
-          first_name=excluded.first_name,
-          last_name=excluded.last_name,
-          username=excluded.username,
-          message=excluded.message,
-          media_type=excluded.media_type,
-          media_path=excluded.media_path,
-          reply_to=excluded.reply_to,
-          post_author=excluded.post_author,
-          is_forwarded=excluded.is_forwarded,
-          forwarded_from_channel_id=excluded.forwarded_from_channel_id
-        """,
-        data,
+    # Use operations batch upsert without auto-commit
+    operations.batch_upsert_messages(
+        session,
+        messages,
+        channel_id=channel_id,
+        replace_existing=True,
+        auto_commit=False,
     )
     # NO COMMIT - caller manages transaction
 
 
 async def stream_messages_with_cache(
     client: TelegramClient,
-    conn: sqlite3.Connection,
+    session: Session,
     channel_id: int,
     start_date: datetime,
     end_date: datetime,
@@ -374,7 +338,7 @@ async def stream_messages_with_cache(
         segments = [TimelineSegment(start_date, end_date, "telegram")]
     else:
         # Check cache and find gaps
-        cached_range_tuple = db_helper.get_cached_date_range(conn, channel_id)
+        cached_range_tuple = operations.get_cached_date_range(session, channel_id)
         # Convert tuple to DateRange object (ensure timezone-aware)
         if cached_range_tuple:
             # Database dates might be timezone-naive, so add UTC timezone if needed
@@ -398,44 +362,41 @@ async def stream_messages_with_cache(
     for segment in segments:
         if segment.source == "cache":
             # Read from cache
-            for batch in db_helper.iter_messages_in_range(
-                conn,
+            for batch in operations.iter_messages_in_range(
+                session,
                 channel_id,
                 segment.start,
                 segment.end,
                 batch_size=telegram_batch_size,
             ):
                 for row in batch:
-                    # Convert row to dict and add media info
-                    msg_dict = dict(row)
+                    # row is already a dict from operations
+                    msg_dict = row
 
-                    # Get media UUID if message has media
-                    # Read operations in WAL mode don't block
-                    if msg_dict.get("media_type"):
-                        media_uuid = db_helper.get_media_uuid_by_message_id(
-                            conn, msg_dict["message_id"]
+                    # Get media info from MediaFile table
+                    media_uuid = operations.get_media_uuid_by_message_id(
+                        session, msg_dict["message_id"]
+                    )
+
+                    if media_uuid:
+                        media_info = operations.get_media_info_by_uuid(
+                            session, media_uuid
                         )
-
-                        if media_uuid:
-                            media_info = db_helper.get_media_info_by_uuid(
-                                conn, media_uuid
+                        if media_info:
+                            msg_dict["media_type"] = Path(media_info.get("file_path")).suffix or "unknown"
+                            msg_dict["media_uuid"] = media_info.get("uuid")
+                            msg_dict["media_size"] = media_info.get("file_size")
+                            file_path = media_info.get("file_path")
+                            msg_dict["media_filename"] = (
+                                Path(file_path).name if file_path else None
                             )
-                            if media_info:
-                                msg_dict["media_uuid"] = media_info.get("uuid")
-                                msg_dict["media_size"] = media_info.get("file_size")
-                                file_path = media_info.get("file_path")
-                                msg_dict["media_filename"] = (
-                                    Path(file_path).name if file_path else None
-                                )
-                            else:
-                                msg_dict["media_uuid"] = None
-                                msg_dict["media_size"] = None
-                                msg_dict["media_filename"] = None
                         else:
+                            msg_dict["media_type"] = None
                             msg_dict["media_uuid"] = None
                             msg_dict["media_size"] = None
                             msg_dict["media_filename"] = None
                     else:
+                        msg_dict["media_type"] = None
                         msg_dict["media_uuid"] = None
                         msg_dict["media_size"] = None
                         msg_dict["media_filename"] = None
@@ -453,7 +414,7 @@ async def stream_messages_with_cache(
             # Download from Telegram
             async for telegram_batch in download_from_telegram_batched(
                 client,
-                conn,
+                session,
                 channel_id,
                 segment.start,
                 segment.end,

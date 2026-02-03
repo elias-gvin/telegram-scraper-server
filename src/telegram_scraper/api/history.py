@@ -12,7 +12,8 @@ from telethon import TelegramClient
 
 from .auth_utils import get_telegram_client
 from ..config import ServerConfig
-from .. import db_helper
+from ..database import operations
+from ..database import get_engine, create_db_and_tables, get_session, ensure_channel_directories
 from ..scraper import stream_messages_with_cache
 
 
@@ -150,76 +151,77 @@ async def get_history(
                 status_code=400, detail="start_date must be before end_date"
             )
 
-        # Ensure channel directory structure and open database
-        paths = db_helper.ensure_channel_directories(_config.output_path, channel_id)
-        conn = db_helper.open_database(
-            paths.db_file,
-            create_if_missing=True,
-            row_factory=True,
-            check_same_thread=False,
-        )
+        # Ensure channel directory structure and initialize database
+        paths = ensure_channel_directories(_config.output_path, channel_id)
 
-        # Ensure schema exists
-        db_helper.ensure_schema(conn)
+        # Create engine and tables
+        engine = get_engine(paths.db_file, check_same_thread=False)
+        create_db_and_tables(engine)
 
         # Upsert channel info
         try:
             entity = await client.get_entity(channel_id)
             channel_name = getattr(entity, "title", None) or str(channel_id)
-            me = await client.get_me()
-            username = getattr(me, "username", None)
-            user_str = f"@{username}" if username else str(getattr(me, "id", ""))
+            
+            # Try to get channel creator if available
+            # Note: Not all channels expose creator info
+            creator_id = None
+            if hasattr(entity, "creator_id"):
+                creator_id = entity.creator_id
 
-            db_helper.upsert_channel(
-                conn,
-                channel_id=str(channel_id),
-                channel_name=channel_name,
-                user=user_str,
-            )
+            with get_session(paths.db_file, check_same_thread=False) as session:
+                operations.upsert_channel(
+                    session,
+                    channel_id=str(channel_id),
+                    channel_name=channel_name,
+                    creator_id=creator_id,
+                )
         except Exception as e:
             logger.warning(f"Could not update channel info: {e}")
 
         if chunk_size == 0:
             # Return all messages at once (not streamed)
             messages = []
-            async for batch in stream_messages_with_cache(
-                client,
-                conn,
-                channel_id,
-                start_dt,
-                end_dt,
-                telegram_batch_size=_config.telegram_batch_size,
-                client_batch_size=1000,  # Large chunks internally
-                force_refresh=force_refresh,
-                scrape_media=_config.download_media,
-                max_media_size_mb=_config.max_media_size_mb,
-                output_dir=_config.output_path,
-            ):
-                messages.extend(batch)
+            with get_session(paths.db_file, check_same_thread=False) as session:
+                async for batch in stream_messages_with_cache(
+                    client,
+                    session,
+                    channel_id,
+                    start_dt,
+                    end_dt,
+                    telegram_batch_size=_config.telegram_batch_size,
+                    client_batch_size=1000,  # Large chunks internally
+                    force_refresh=force_refresh,
+                    scrape_media=_config.download_media,
+                    max_media_size_mb=_config.max_media_size_mb,
+                    output_dir=_config.output_path,
+                ):
+                    messages.extend(batch)
 
             return {"messages": messages}
 
         else:
             # Stream messages in chunks via SSE
             async def event_stream():
-                try:
-                    async for batch in stream_messages_with_cache(
-                        client,
-                        conn,
-                        channel_id,
-                        start_dt,
-                        end_dt,
-                        telegram_batch_size=_config.telegram_batch_size,
-                        client_batch_size=chunk_size,
-                        force_refresh=force_refresh,
-                        scrape_media=_config.download_media,
-                        max_media_size_mb=_config.max_media_size_mb,
-                        output_dir=_config.output_path,
-                    ):
-                        yield f"data: {json.dumps({'messages': batch})}\n\n"
-                finally:
-                    # Cleanup database connection
-                    conn.close()
+                with get_session(paths.db_file, check_same_thread=False) as session:
+                    try:
+                        async for batch in stream_messages_with_cache(
+                            client,
+                            session,
+                            channel_id,
+                            start_dt,
+                            end_dt,
+                            telegram_batch_size=_config.telegram_batch_size,
+                            client_batch_size=chunk_size,
+                            force_refresh=force_refresh,
+                            scrape_media=_config.download_media,
+                            max_media_size_mb=_config.max_media_size_mb,
+                            output_dir=_config.output_path,
+                        ):
+                            yield f"data: {json.dumps({'messages': batch})}\n\n"
+                    finally:
+                        # Session cleanup happens automatically with context manager
+                        pass
 
             return StreamingResponse(event_stream(), media_type="text/event-stream")
 
