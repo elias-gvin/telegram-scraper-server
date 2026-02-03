@@ -252,7 +252,13 @@ def main(
     )
 
 
+# TODO: figure out how to run server allow running server in 2 ways:
+# 1. From script: tgsc-server
+# 2. From uvicorn CLI: uvicorn telegram_scraper.server:app --reload
+# Right now, those 2 ways are not compatible, since you have to create app instance in both cases.
+# And creation / configuration process is different in both cases.
+
 # For development with uvicorn CLI (e.g., uvicorn telegram_scraper.server:app --reload)
 # Configure via environment variables. Use tgsc-server for config file support.
-if __name__ != "__main__":
-    app = create_app(load_config())
+# if __name__ != "__main__":
+    # app = create_app(load_config())
