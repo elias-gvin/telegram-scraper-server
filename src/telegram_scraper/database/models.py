@@ -11,11 +11,16 @@ class Channel(SQLModel, table=True):
 
     channel_id: str = Field(primary_key=True)
     channel_name: Optional[str] = None
-    creator_id: Optional[int] = Field(default=None, foreign_key="users.user_id")
+    creator_id: Optional[int] = None  # No foreign key - allows orphaned creator IDs
 
     # Relationships
     messages: list["Message"] = Relationship(back_populates="channel")
-    creator: Optional["User"] = Relationship()
+    creator: Optional["User"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[Channel.creator_id]",
+            "primaryjoin": "User.user_id == Channel.creator_id",
+        }
+    )
 
 
 class User(SQLModel, table=True):
@@ -41,7 +46,9 @@ class MediaFile(SQLModel, table=True):
     message_id: int = Field(unique=True, index=True)  # For reverse lookup
     file_path: str
     file_size: Optional[int] = None
-    mime_type: Optional[str] = None
+    media_type: Optional[str] = (
+        None  # Telegram media type (e.g., 'MessageMediaPhoto', 'MessageMediaDocument')
+    )
     created_at: str
 
     # Relationships
@@ -54,6 +61,24 @@ class MediaFile(SQLModel, table=True):
     )
 
 
+# msg_data = MessageData(
+#     message_id=message.id,
+#     date=message.date.strftime('%Y-%m-%d %H:%M:%S'),
+#     sender_id=message.sender_id,
+#     first_name=getattr(sender, 'first_name', None) if isinstance(sender, User) else None,
+#     last_name=getattr(sender, 'last_name', None) if isinstance(sender, User) else None,
+#     username=getattr(sender, 'username', None) if isinstance(sender, User) else None,
+#     message=message.message or '',
+#     media_type=message.media.__class__.__name__ if message.media else None,
+#     media_path=None,
+#     reply_to=message.reply_to_msg_id if message.reply_to else None,
+#     post_author=message.post_author,
+#     views=message.views,
+#     forwards=message.forwards,
+#     reactions=reactions_str
+# )
+
+
 class Message(SQLModel, table=True):
     """Message data table."""
 
@@ -64,24 +89,48 @@ class Message(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    channel_id: str = Field(foreign_key="channels.channel_id", index=True)
+    channel_id: str = Field(index=True)  # No foreign key - allows orphaned channel IDs
     message_id: int = Field(index=True)
     date: str = Field(index=True)
-    sender_id: int = Field(foreign_key="users.user_id", index=True)
+    sender_id: int = Field(index=True)  # No foreign key - allows orphaned sender IDs
     message: str
     media_uuid: Optional[str] = Field(default=None, foreign_key="media_files.uuid")
-    reply_to: Optional[int] = None
+    reply_to: Optional[int] = Field(
+        default=None, index=True
+    )  # message_id of replied-to message (in same channel)
     post_author: Optional[str] = None
     is_forwarded: int
-    forwarded_from_channel_id: Optional[int] = None
+    forwarded_from_channel_id: Optional[int] = (
+        None  # TODO: should we add a link to the channel table?
+    )
 
     # Relationships
-    channel: Optional[Channel] = Relationship(back_populates="messages")
-    sender: Optional[User] = Relationship(back_populates="messages")
+    channel: Optional[Channel] = Relationship(
+        back_populates="messages",
+        sa_relationship_kwargs={
+            "foreign_keys": "[Message.channel_id]",
+            "primaryjoin": "Channel.channel_id == Message.channel_id",
+        },
+    )
+    sender: Optional[User] = Relationship(
+        back_populates="messages",
+        sa_relationship_kwargs={
+            "foreign_keys": "[Message.sender_id]",
+            "primaryjoin": "User.user_id == Message.sender_id",
+        },
+    )
     media_file: Optional[MediaFile] = Relationship(
         back_populates="message",
         sa_relationship_kwargs={
             "foreign_keys": "[Message.media_uuid]",
             "uselist": False,
         },
+    )
+    # Self-referential: the message this message replies to
+    reply_to_message: Optional["Message"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[Message.reply_to]",
+            "primaryjoin": "and_(Message.channel_id == remote(Message.channel_id), Message.reply_to == remote(Message.message_id))",
+            "uselist": False,
+        }
     )
