@@ -13,7 +13,12 @@ from telethon import TelegramClient
 from .auth_utils import get_telegram_client
 from ..config import ServerConfig
 from ..database import operations
-from ..database import get_engine, create_db_and_tables, get_session, ensure_channel_directories
+from ..database import (
+    get_engine,
+    create_db_and_tables,
+    get_session,
+    ensure_channel_directories,
+)
 from ..scraper import stream_messages_with_cache
 
 
@@ -162,7 +167,7 @@ async def get_history(
         try:
             entity = await client.get_entity(channel_id)
             channel_name = getattr(entity, "title", None) or str(channel_id)
-            
+
             # Try to get channel creator if available
             # Note: Not all channels expose creator info
             creator_id = None

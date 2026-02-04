@@ -383,7 +383,9 @@ async def stream_messages_with_cache(
                             session, media_uuid
                         )
                         if media_info:
-                            msg_dict["media_type"] = Path(media_info.get("file_path")).suffix or "unknown"
+                            msg_dict["media_type"] = (
+                                Path(media_info.get("file_path")).suffix or "unknown"
+                            )
                             msg_dict["media_uuid"] = media_info.get("uuid")
                             msg_dict["media_size"] = media_info.get("file_size")
                             file_path = media_info.get("file_path")

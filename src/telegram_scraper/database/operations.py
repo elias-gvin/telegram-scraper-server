@@ -122,7 +122,7 @@ def batch_upsert_messages(
 
     for msg in messages:
         sender_id = int(getattr(msg, "sender_id"))
-        
+
         # Upsert user first (to satisfy foreign key), without committing
         upsert_user(
             session,
@@ -132,7 +132,7 @@ def batch_upsert_messages(
             username=getattr(msg, "username", None),
             auto_commit=False,
         )
-        
+
         # Check if message exists
         existing = session.exec(
             select(Message).where(Message.message_id == int(getattr(msg, "message_id")))
@@ -331,7 +331,7 @@ def iter_messages_in_range(
             .offset(offset)
             .limit(batch_size)
         )
-        
+
         results = session.exec(statement).all()
 
         if not results:

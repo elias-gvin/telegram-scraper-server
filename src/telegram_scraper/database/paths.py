@@ -54,4 +54,3 @@ def ensure_channel_directories(
     paths.channel_dir.mkdir(parents=True, exist_ok=True)
     paths.media_dir.mkdir(parents=True, exist_ok=True)
     return paths
-
