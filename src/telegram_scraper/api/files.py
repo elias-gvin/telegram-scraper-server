@@ -96,6 +96,7 @@ async def get_file(
 
     # Determine media type for response (use mimetypes to guess from file extension)
     import mimetypes
+
     mime_type, _ = mimetypes.guess_type(str(file_path))
     media_type = mime_type or "application/octet-stream"
 

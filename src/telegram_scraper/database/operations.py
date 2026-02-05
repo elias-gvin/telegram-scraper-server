@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid as uuid_lib
-import mimetypes
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, Sequence, List, Tuple

@@ -25,32 +25,17 @@ logger = logging.getLogger(__name__)
 
 def transform_message_to_response(msg_dict: dict) -> dict:
     """
-    Transform flat message dict to nested response format.
+    Transform message dict to API response format.
 
-    Converts flat media fields (media_type, media_uuid, media_size, media_filename)
-    into nested media object. Also removes internal database fields.
+    Removes internal database fields and keeps all user-facing fields flat.
     """
     # Remove internal database fields that shouldn't be in API response
     msg_dict.pop("id", None)
     msg_dict.pop("channel_id", None)
     msg_dict.pop("media_path", None)
 
-    # Extract media fields
-    media_type = msg_dict.pop("media_type", None)
-    media_uuid = msg_dict.pop("media_uuid", None)
-    media_size = msg_dict.pop("media_size", None)
-    media_filename = msg_dict.pop("media_filename", None)
-
-    # Create nested media object if media exists
-    if media_type and media_uuid and media_filename and media_size is not None:
-        msg_dict["media"] = {
-            "type": media_type,
-            "uuid": media_uuid,
-            "filename": media_filename,
-            "size": media_size,
-        }
-    else:
-        msg_dict["media"] = None
+    # Keep media fields flat (media_type, media_uuid, media_size, media_filename)
+    # No transformation needed - just return the cleaned dict
 
     return msg_dict
 
@@ -444,19 +429,20 @@ async def stream_messages_with_cache(
                     msg_dict = {
                         "message_id": msg.message_id,
                         "date": msg.date,
+                        "edit_date": msg.edit_date,
                         "sender_id": msg.sender_id,
                         "first_name": msg.first_name,
                         "last_name": msg.last_name,
                         "username": msg.username,
                         "message": msg.message,
-                        "media_type": msg.media_type,
-                        "media_uuid": msg.media_uuid,
-                        "media_size": msg.media_size,
-                        "media_filename": media_filename,
                         "reply_to": msg.reply_to,
                         "post_author": msg.post_author,
                         "is_forwarded": msg.is_forwarded,
                         "forwarded_from_channel_id": msg.forwarded_from_channel_id,
+                        "media_type": msg.media_type,
+                        "media_uuid": msg.media_uuid,
+                        "media_filename": media_filename,
+                        "media_size": msg.media_size,
                     }
                     # Transform to nested response format
                     msg_dict = transform_message_to_response(msg_dict)
