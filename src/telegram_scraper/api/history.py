@@ -184,51 +184,32 @@ async def get_history(
         except Exception as e:
             logger.warning(f"Could not update channel info: {e}")
 
-        if chunk_size == 0:
-            # Return all messages at once (not streamed)
-            messages = []
+        # Always stream messages via SSE (unified approach)
+        # Use chunk_size for batch size, or default to 1000 if chunk_size=0
+        batch_size = chunk_size if chunk_size > 0 else 1000
+
+        async def event_stream():
             with get_session(paths.db_file, check_same_thread=False) as session:
-                async for batch in stream_messages_with_cache(
-                    client,
-                    session,
-                    channel_id,
-                    start_dt,
-                    end_dt,
-                    telegram_batch_size=_config.telegram_batch_size,
-                    client_batch_size=1000,  # Large chunks internally
-                    force_refresh=force_refresh,
-                    scrape_media=_config.download_media,
-                    max_media_size_mb=_config.max_media_size_mb,
-                    output_dir=_config.output_path,
-                ):
-                    messages.extend(batch)
+                try:
+                    async for batch in stream_messages_with_cache(
+                        client,
+                        session,
+                        channel_id,
+                        start_dt,
+                        end_dt,
+                        telegram_batch_size=_config.telegram_batch_size,
+                        client_batch_size=batch_size,
+                        force_refresh=force_refresh,
+                        scrape_media=_config.download_media,
+                        max_media_size_mb=_config.max_media_size_mb,
+                        output_dir=_config.output_path,
+                    ):
+                        yield f"data: {json.dumps({'messages': batch})}\n\n"
+                finally:
+                    # Session cleanup happens automatically with context manager
+                    pass
 
-            return {"messages": messages}
-
-        else:
-            # Stream messages in chunks via SSE
-            async def event_stream():
-                with get_session(paths.db_file, check_same_thread=False) as session:
-                    try:
-                        async for batch in stream_messages_with_cache(
-                            client,
-                            session,
-                            channel_id,
-                            start_dt,
-                            end_dt,
-                            telegram_batch_size=_config.telegram_batch_size,
-                            client_batch_size=chunk_size,
-                            force_refresh=force_refresh,
-                            scrape_media=_config.download_media,
-                            max_media_size_mb=_config.max_media_size_mb,
-                            output_dir=_config.output_path,
-                        ):
-                            yield f"data: {json.dumps({'messages': batch})}\n\n"
-                    finally:
-                        # Session cleanup happens automatically with context manager
-                        pass
-
-            return StreamingResponse(event_stream(), media_type="text/event-stream")
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     except HTTPException:
         raise
