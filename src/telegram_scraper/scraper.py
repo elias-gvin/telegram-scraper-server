@@ -157,6 +157,9 @@ async def download_from_telegram_batched(
     batch = []
     entity = await client.get_entity(channel_id)
 
+    # Get channel name from entity
+    channel_name = getattr(entity, "title", None)
+
     # Make dates timezone-aware
     if start_date.tzinfo is None:
         start_date = start_date.replace(tzinfo=timezone.utc)
@@ -189,6 +192,7 @@ async def download_from_telegram_batched(
             media_type = message.media.__class__.__name__ if message.media else None
             media_path = None
             media_size = None
+            media_filename = None
 
             # Download media if requested
             if (
@@ -204,6 +208,7 @@ async def download_from_telegram_batched(
                 )
                 if result.status == "downloaded" and result.path:
                     media_path = result.path
+                    media_filename = Path(media_path).name
                     try:
                         media_size = Path(media_path).stat().st_size
                     except Exception:
@@ -211,7 +216,12 @@ async def download_from_telegram_batched(
 
             msg_data = MessageData(
                 message_id=message.id,
+                channel_id=channel_id,
+                channel_name=channel_name,
                 date=message.date.strftime("%Y-%m-%d %H:%M:%S"),
+                edit_date=message.edit_date.strftime("%Y-%m-%d %H:%M:%S")
+                if message.edit_date
+                else None,
                 sender_id=message.sender_id or 0,
                 first_name=getattr(sender, "first_name", None)
                 if isinstance(sender, User)
@@ -225,16 +235,14 @@ async def download_from_telegram_batched(
                 message=message.message or "",
                 media_type=media_type,
                 media_path=media_path,
+                media_filename=media_filename,
+                media_size=media_size,
+                media_uuid=None,  # Will be set after insertion
                 reply_to=message.reply_to_msg_id if message.reply_to else None,
                 post_author=message.post_author,
                 is_forwarded=is_forwarded,
                 forwarded_from_channel_id=forwarded_from_channel_id,
             )
-
-            # Store media info for later UUID generation
-            # (UUID must be generated AFTER message is inserted due to FK constraint)
-            msg_data.media_uuid = None  # Will be set after insertion
-            msg_data.media_size = media_size
 
             batch.append(msg_data)
 
@@ -249,9 +257,11 @@ async def download_from_telegram_batched(
                         if msg.media_path:
                             msg.media_uuid = operations.store_media_with_uuid(
                                 session,
-                                msg.message_id,
-                                msg.media_path,
+                                channel_id=channel_id,
+                                message_id=msg.message_id,
+                                file_path=msg.media_path,
                                 file_size=msg.media_size,
+                                media_type=msg.media_type,
                             )
                     session.commit()
                 except Exception as e:
@@ -277,9 +287,11 @@ async def download_from_telegram_batched(
                 if msg.media_path:
                     msg.media_uuid = operations.store_media_with_uuid(
                         session,
-                        msg.message_id,
-                        msg.media_path,
+                        channel_id=channel_id,
+                        message_id=msg.message_id,
+                        file_path=msg.media_path,
                         file_size=msg.media_size,
+                        media_type=msg.media_type,
                     )
             session.commit()
         except Exception as e:
@@ -375,7 +387,7 @@ async def stream_messages_with_cache(
 
                     # Get media info from MediaFile table
                     media_uuid = operations.get_media_uuid_by_message_id(
-                        session, msg_dict["message_id"]
+                        session, channel_id, msg_dict["message_id"]
                     )
 
                     if media_uuid:
@@ -384,7 +396,7 @@ async def stream_messages_with_cache(
                         )
                         if media_info:
                             msg_dict["media_type"] = (
-                                Path(media_info.get("file_path")).suffix or "unknown"
+                                media_info.get("media_type") or "unknown"
                             )
                             msg_dict["media_uuid"] = media_info.get("uuid")
                             msg_dict["media_size"] = media_info.get("file_size")

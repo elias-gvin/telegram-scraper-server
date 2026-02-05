@@ -17,6 +17,7 @@ def upsert_channel(
     *,
     channel_id: str | int,
     channel_name: str,
+    channel_username: str | None = None,
     creator_id: int | None = None,
 ) -> Channel:
     """
@@ -26,23 +27,27 @@ def upsert_channel(
         session: SQLModel session
         channel_id: Channel ID
         channel_name: Channel name/title
+        channel_username: Channel username (e.g., @channelname)
         creator_id: Telegram user ID of channel creator/owner (optional)
 
     Returns:
         Channel object
     """
-    channel = session.get(Channel, str(channel_id))
+    channel = session.get(Channel, int(channel_id))
 
     if channel:
         # Update existing
         channel.channel_name = channel_name
+        if channel_username is not None:
+            channel.channel_username = channel_username
         if creator_id is not None:
             channel.creator_id = creator_id
     else:
         # Create new
         channel = Channel(
-            channel_id=str(channel_id),
+            channel_id=int(channel_id),
             channel_name=channel_name,
+            channel_username=channel_username,
             creator_id=creator_id,
         )
         session.add(channel)
@@ -123,7 +128,7 @@ def batch_upsert_messages(
     for msg in messages:
         sender_id = int(getattr(msg, "sender_id"))
 
-        # Upsert user first (to satisfy foreign key), without committing
+        # Upsert user first (no FK, but keep user table updated)
         upsert_user(
             session,
             user_id=sender_id,
@@ -135,14 +140,18 @@ def batch_upsert_messages(
 
         # Check if message exists
         existing = session.exec(
-            select(Message).where(Message.message_id == int(getattr(msg, "message_id")))
+            select(Message).where(
+                Message.channel_id == int(channel_id),
+                Message.message_id == int(getattr(msg, "message_id")),
+            )
         ).first()
 
         if existing:
             if replace_existing:
                 # Update existing message
-                existing.channel_id = str(channel_id)
+                existing.channel_id = int(channel_id)
                 existing.date = str(getattr(msg, "date"))
+                existing.edit_date = getattr(msg, "edit_date", None)
                 existing.sender_id = sender_id
                 existing.message = str(getattr(msg, "message"))
                 existing.reply_to = getattr(msg, "reply_to", None)
@@ -151,12 +160,14 @@ def batch_upsert_messages(
                 existing.forwarded_from_channel_id = getattr(
                     msg, "forwarded_from_channel_id", None
                 )
+                # media_uuid updated separately by store_media_with_uuid
         else:
             # Insert new message
             new_message = Message(
-                channel_id=str(channel_id),
+                channel_id=int(channel_id),
                 message_id=int(getattr(msg, "message_id")),
                 date=str(getattr(msg, "date")),
+                edit_date=getattr(msg, "edit_date", None),
                 sender_id=sender_id,
                 message=str(getattr(msg, "message")),
                 reply_to=getattr(msg, "reply_to", None),
@@ -182,63 +193,72 @@ def generate_media_uuid() -> str:
 
 def store_media_with_uuid(
     session: Session,
+    channel_id: int,
     message_id: int,
     file_path: str,
     file_size: Optional[int] = None,
-    mime_type: Optional[str] = None,
+    media_type: Optional[str] = None,
 ) -> str:
     """
-    Store media file info with UUID and update the message's media_uuid reference.
+    Store media file with UUID and link it to the message.
 
     Args:
         session: SQLModel session
+        channel_id: Channel ID
         message_id: Message ID this media belongs to
-        file_path: File system path to media file
-        file_size: File size in bytes (optional)
-        mime_type: MIME type (optional, will be guessed if not provided)
+        file_path: Full file path
+        file_size: File size in bytes (will be calculated if None)
+        media_type: Telegram media type (e.g., 'MessageMediaPhoto')
 
     Returns:
         UUID string
     """
     media_uuid = generate_media_uuid()
 
-    # Guess MIME type if not provided
-    if mime_type is None:
-        mime_type, _ = mimetypes.guess_type(file_path)
+    file_name = Path(file_path).name
+    mime_type, _ = mimetypes.guess_type(file_path)
 
     # Get file size if not provided
     if file_size is None:
         try:
             file_size = Path(file_path).stat().st_size
         except Exception:
-            file_size = None
+            file_size = 0
 
-    # Check if media file already exists for this message
+    # Check if media already exists for this message
     existing = session.exec(
-        select(MediaFile).where(MediaFile.message_id == message_id)
+        select(MediaFile).where(
+            MediaFile.channel_id == channel_id, MediaFile.message_id == message_id
+        )
     ).first()
 
     if existing:
-        # Update existing
+        # Update existing entry
         existing.uuid = media_uuid
         existing.file_path = file_path
+        existing.file_name = file_name
         existing.file_size = file_size
         existing.mime_type = mime_type
+        existing.media_type = media_type or "unknown"
     else:
-        # Create new
+        # Create new entry
         media_file = MediaFile(
             uuid=media_uuid,
+            channel_id=channel_id,
             message_id=message_id,
             file_path=file_path,
+            file_name=file_name,
             file_size=file_size,
             mime_type=mime_type,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            media_type=media_type or "unknown",
         )
         session.add(media_file)
 
-    # Update the message's media_uuid reference
+    # Update message's media_uuid (FK reference)
     message = session.exec(
-        select(Message).where(Message.message_id == message_id)
+        select(Message).where(
+            Message.channel_id == channel_id, Message.message_id == message_id
+        )
     ).first()
     if message:
         message.media_uuid = media_uuid
@@ -247,10 +267,14 @@ def store_media_with_uuid(
     return media_uuid
 
 
-def get_media_uuid_by_message_id(session: Session, message_id: int) -> Optional[str]:
+def get_media_uuid_by_message_id(
+    session: Session, channel_id: int, message_id: int
+) -> Optional[str]:
     """Get media UUID for a message by querying the message directly."""
     message = session.exec(
-        select(Message).where(Message.message_id == message_id)
+        select(Message).where(
+            Message.channel_id == channel_id, Message.message_id == message_id
+        )
     ).first()
 
     return message.media_uuid if message else None
@@ -261,7 +285,7 @@ def get_media_info_by_uuid(session: Session, media_uuid: str) -> Optional[dict]:
     Get media file info by UUID.
 
     Returns:
-        Dict with keys: uuid, message_id, file_path, file_size, mime_type, created_at
+        Dict with keys: uuid, channel_id, message_id, file_path, file_name, file_size, mime_type, media_type
         or None if not found
     """
     media_file = session.get(MediaFile, media_uuid)
@@ -269,11 +293,13 @@ def get_media_info_by_uuid(session: Session, media_uuid: str) -> Optional[dict]:
     if media_file:
         return {
             "uuid": media_file.uuid,
+            "channel_id": media_file.channel_id,
             "message_id": media_file.message_id,
             "file_path": media_file.file_path,
+            "file_name": media_file.file_name,
             "file_size": media_file.file_size,
             "mime_type": media_file.mime_type,
-            "created_at": media_file.created_at,
+            "media_type": media_file.media_type,
         }
     return None
 
@@ -292,7 +318,7 @@ def get_cached_date_range(
 
     result = session.exec(
         sa_select(func.min(Message.date), func.max(Message.date)).where(
-            Message.channel_id == str(channel_id)
+            Message.channel_id == int(channel_id)
         )
     ).first()
 
@@ -323,7 +349,7 @@ def iter_messages_in_range(
             select(Message, User)
             .join(User, Message.sender_id == User.user_id, isouter=True)
             .where(
-                Message.channel_id == str(channel_id),
+                Message.channel_id == int(channel_id),
                 Message.date >= start_date.isoformat(),
                 Message.date <= end_date.isoformat(),
             )
@@ -345,6 +371,7 @@ def iter_messages_in_range(
                 "channel_id": msg.channel_id,
                 "message_id": msg.message_id,
                 "date": msg.date,
+                "edit_date": msg.edit_date,
                 "sender_id": msg.sender_id,
                 "first_name": user.first_name if user else None,
                 "last_name": user.last_name if user else None,
