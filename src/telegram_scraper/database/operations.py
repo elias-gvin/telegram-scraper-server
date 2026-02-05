@@ -204,8 +204,8 @@ def store_media_with_uuid(
 
     Args:
         session: SQLModel session
-        channel_id: Channel ID
-        message_id: Message ID this media belongs to
+        channel_id: Channel ID (used to find the message)
+        message_id: Message ID (used to find the message)
         file_path: Full file path
         file_size: File size in bytes (will be calculated if None)
         media_type: Telegram media type (e.g., 'MessageMediaPhoto')
@@ -215,9 +215,6 @@ def store_media_with_uuid(
     """
     media_uuid = generate_media_uuid()
 
-    file_name = Path(file_path).name
-    mime_type, _ = mimetypes.guess_type(file_path)
-
     # Get file size if not provided
     if file_size is None:
         try:
@@ -225,31 +222,20 @@ def store_media_with_uuid(
         except Exception:
             file_size = 0
 
-    # Check if media already exists for this message
-    existing = session.exec(
-        select(MediaFile).where(
-            MediaFile.channel_id == channel_id, MediaFile.message_id == message_id
-        )
-    ).first()
+    # Check if media already exists for this UUID
+    existing = session.get(MediaFile, media_uuid)
 
     if existing:
         # Update existing entry
-        existing.uuid = media_uuid
         existing.file_path = file_path
-        existing.file_name = file_name
         existing.file_size = file_size
-        existing.mime_type = mime_type
         existing.media_type = media_type or "unknown"
     else:
         # Create new entry
         media_file = MediaFile(
             uuid=media_uuid,
-            channel_id=channel_id,
-            message_id=message_id,
             file_path=file_path,
-            file_name=file_name,
             file_size=file_size,
-            mime_type=mime_type,
             media_type=media_type or "unknown",
         )
         session.add(media_file)
@@ -285,7 +271,7 @@ def get_media_info_by_uuid(session: Session, media_uuid: str) -> Optional[dict]:
     Get media file info by UUID.
 
     Returns:
-        Dict with keys: uuid, channel_id, message_id, file_path, file_name, file_size, mime_type, media_type
+        Dict with keys: uuid, file_path, file_size, media_type
         or None if not found
     """
     media_file = session.get(MediaFile, media_uuid)
@@ -293,12 +279,8 @@ def get_media_info_by_uuid(session: Session, media_uuid: str) -> Optional[dict]:
     if media_file:
         return {
             "uuid": media_file.uuid,
-            "channel_id": media_file.channel_id,
-            "message_id": media_file.message_id,
             "file_path": media_file.file_path,
-            "file_name": media_file.file_name,
             "file_size": media_file.file_size,
-            "mime_type": media_file.mime_type,
             "media_type": media_file.media_type,
         }
     return None

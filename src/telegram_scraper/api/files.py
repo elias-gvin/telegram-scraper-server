@@ -94,8 +94,10 @@ async def get_file(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Media file not found on disk")
 
-    # Determine media type for response
-    media_type = media_info.get("mime_type") or "application/octet-stream"
+    # Determine media type for response (use mimetypes to guess from file extension)
+    import mimetypes
+    mime_type, _ = mimetypes.guess_type(str(file_path))
+    media_type = mime_type or "application/octet-stream"
 
     return FileResponse(
         path=str(file_path),

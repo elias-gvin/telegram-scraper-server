@@ -192,7 +192,6 @@ async def download_from_telegram_batched(
             media_type = message.media.__class__.__name__ if message.media else None
             media_path = None
             media_size = None
-            media_filename = None
 
             # Download media if requested
             if (
@@ -208,7 +207,6 @@ async def download_from_telegram_batched(
                 )
                 if result.status == "downloaded" and result.path:
                     media_path = result.path
-                    media_filename = Path(media_path).name
                     try:
                         media_size = Path(media_path).stat().st_size
                     except Exception:
@@ -235,7 +233,6 @@ async def download_from_telegram_batched(
                 message=message.message or "",
                 media_type=media_type,
                 media_path=media_path,
-                media_filename=media_filename,
                 media_size=media_size,
                 media_uuid=None,  # Will be set after insertion
                 reply_to=message.reply_to_msg_id if message.reply_to else None,

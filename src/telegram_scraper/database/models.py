@@ -37,15 +37,9 @@ class MediaFile(SQLModel, table=True):
 
     uuid: str = Field(primary_key=True)  # UUID v4
 
-    # Message reference (no FK)
-    channel_id: int = Field(index=True)
-    message_id: int = Field(index=True)
-
     # File info
     file_path: str
-    file_name: str
     file_size: int  # Bytes
-    mime_type: Optional[str] = None
     media_type: str  # Telegram type: MessageMediaPhoto, MessageMediaDocument, etc.
 
 

@@ -55,7 +55,6 @@ class MessageData:
     media_type: Optional[str]  # Telegram class name
     media_uuid: Optional[str]  # Generated UUID
     media_path: Optional[str]  # Local file path
-    media_filename: Optional[str]  # Original filename
     media_size: Optional[int]  # Bytes
 
     # Extended (not from Telegram API)
