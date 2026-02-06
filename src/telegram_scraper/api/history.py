@@ -88,19 +88,21 @@ def parse_date(date_str: str) -> datetime:
     "/history/{channel_id}",
     summary="Get message history",
     description="""
-    Stream message history with smart caching.
+    Stream message history with smart caching via Server-Sent Events (SSE).
     
-    - chunk_size=0: Return all messages as single JSON array
-    - chunk_size>0: Stream messages in chunks via Server-Sent Events (SSE)
+    - Messages are always streamed in chunks (SSE format)
+    - chunk_size: Number of messages per chunk (default: 100, must be > 0)
     - start_date: Optional, defaults to beginning of chat
     - end_date: Optional, defaults to current time
+    - force_refresh: Bypass cache and re-download from Telegram
     
     Examples:
-    - `/api/v1/history/123?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250`
-    - `/api/v1/history/123?chunk_size=0` (all messages, all time)
+    - `/api/v1/history/123` (all messages, default 100/chunk)
+    - `/api/v1/history/123?chunk_size=50` (smaller chunks for faster updates)
+    - `/api/v1/history/123?start_date=2024-01-01&end_date=2024-01-31`
     - `/api/v1/history/123?end_date=2024-01-31` (from beginning to Jan 31)
     - `/api/v1/history/123?start_date=2024-01-01` (from Jan 1 to now)
-    - `/api/v1/history/123?start_date=2024-01-01&end_date=2024-01-31&force_refresh=true` (bypass cache)
+    - `/api/v1/history/123?force_refresh=true` (bypass cache)
     """,
 )
 async def get_history(
@@ -119,8 +121,8 @@ async def get_history(
     ] = None,
     chunk_size: Annotated[
         int,
-        Query(ge=0, description="Chunk size (0 = return all messages in one response)"),
-    ] = 250,
+        Query(gt=0, description="Number of messages per chunk in streaming response"),
+    ] = 100,
     force_refresh: Annotated[
         bool, Query(description="Force re-download even if cached")
     ] = False,
@@ -184,9 +186,7 @@ async def get_history(
         except Exception as e:
             logger.warning(f"Could not update channel info: {e}")
 
-        # Always stream messages via SSE (unified approach)
-        # Use chunk_size for batch size, or default to 1000 if chunk_size=0
-        batch_size = chunk_size if chunk_size > 0 else 1000
+        batch_size = chunk_size
 
         async def event_stream():
             with get_session(paths.db_file, check_same_thread=False) as session:
