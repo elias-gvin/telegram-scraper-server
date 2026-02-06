@@ -2,29 +2,51 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 
 
+# See https://core.telegram.org/constructor/message for more information about the fields.
 @dataclass
 class MessageData:
-    """Message data model."""
+    """Message data model - matches Telegram API + our extensions."""
 
+    # Core message identity
     message_id: int
-    date: str
+    channel_id: int
+
+    # Timestamps
+    date: str  # YYYY-MM-DD HH:MM:SS
+
+    # Sender (may be orphaned)
     sender_id: int
-    first_name: Optional[str]
-    last_name: Optional[str]
-    username: Optional[str]
+
+    # Content
     message: str
-    media_type: Optional[str]
-    media_path: Optional[str]
-    reply_to: Optional[int]
-    post_author: Optional[str]
+
+    # Context
     is_forwarded: int
-    forwarded_from_channel_id: Optional[int]
-    # Extended fields (set dynamically)
-    media_uuid: Optional[str] = None
-    media_size: Optional[int] = None
+
+    # Extended (not from Telegram API)
+    channel_name: Optional[str] = None
+
+    # Timestamps (optional)
+    edit_date: Optional[str] = None  # YYYY-MM-DD HH:MM:SS or None
+
+    # Sender (optional)
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+
+    # Context (optional)
+    reply_to: Optional[int] = None
+    post_author: Optional[str] = None
+    forwarded_from_channel_id: Optional[int] = None
+
+    # Media (filled after download)
+    media_type: Optional[str] = None  # Telegram class name
+    media_uuid: Optional[str] = None  # Generated UUID
+    media_path: Optional[str] = None  # Local file path
+    media_size: Optional[int] = None  # Bytes
 
 
 @dataclass
@@ -41,4 +63,4 @@ class TimelineSegment:
 
     start: datetime
     end: datetime
-    source: str  # "cache" or "telegram"
+    source: Literal["cache", "telegram"]

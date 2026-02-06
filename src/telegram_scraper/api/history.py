@@ -12,7 +12,13 @@ from telethon import TelegramClient
 
 from .auth_utils import get_telegram_client
 from ..config import ServerConfig
-from .. import db_helper
+from ..database import operations
+from ..database import (
+    get_engine,
+    create_db_and_tables,
+    get_session,
+    ensure_channel_directories,
+)
 from ..scraper import stream_messages_with_cache
 
 
@@ -82,19 +88,21 @@ def parse_date(date_str: str) -> datetime:
     "/history/{channel_id}",
     summary="Get message history",
     description="""
-    Stream message history with smart caching.
+    Stream message history with smart caching via Server-Sent Events (SSE).
     
-    - chunk_size=0: Return all messages as single JSON array
-    - chunk_size>0: Stream messages in chunks via Server-Sent Events (SSE)
+    - Messages are always streamed in chunks (SSE format)
+    - chunk_size: Number of messages per chunk (default: 100, must be > 0)
     - start_date: Optional, defaults to beginning of chat
     - end_date: Optional, defaults to current time
+    - force_refresh: Bypass cache and re-download from Telegram
     
     Examples:
-    - `/api/v1/history/123?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250`
-    - `/api/v1/history/123?chunk_size=0` (all messages, all time)
+    - `/api/v1/history/123` (all messages, default 100/chunk)
+    - `/api/v1/history/123?chunk_size=50` (smaller chunks for faster updates)
+    - `/api/v1/history/123?start_date=2024-01-01&end_date=2024-01-31`
     - `/api/v1/history/123?end_date=2024-01-31` (from beginning to Jan 31)
     - `/api/v1/history/123?start_date=2024-01-01` (from Jan 1 to now)
-    - `/api/v1/history/123?start_date=2024-01-01&end_date=2024-01-31&force_refresh=true` (bypass cache)
+    - `/api/v1/history/123?force_refresh=true` (bypass cache)
     """,
 )
 async def get_history(
@@ -113,8 +121,8 @@ async def get_history(
     ] = None,
     chunk_size: Annotated[
         int,
-        Query(ge=0, description="Chunk size (0 = return all messages in one response)"),
-    ] = 250,
+        Query(gt=0, description="Number of messages per chunk in streaming response"),
+    ] = 100,
     force_refresh: Annotated[
         bool, Query(description="Force re-download even if cached")
     ] = False,
@@ -150,67 +158,47 @@ async def get_history(
                 status_code=400, detail="start_date must be before end_date"
             )
 
-        # Ensure channel directory structure and open database
-        paths = db_helper.ensure_channel_directories(_config.output_path, channel_id)
-        conn = db_helper.open_database(
-            paths.db_file,
-            create_if_missing=True,
-            row_factory=True,
-            check_same_thread=False,
-        )
+        # Ensure channel directory structure and initialize database
+        paths = ensure_channel_directories(_config.output_path, channel_id)
 
-        # Ensure schema exists
-        db_helper.ensure_schema(conn)
+        # Create engine and tables
+        engine = get_engine(paths.db_file, check_same_thread=False)
+        create_db_and_tables(engine)
 
         # Upsert channel info
         try:
             entity = await client.get_entity(channel_id)
             channel_name = getattr(entity, "title", None) or str(channel_id)
-            me = await client.get_me()
-            username = getattr(me, "username", None)
-            user_str = f"@{username}" if username else str(getattr(me, "id", ""))
 
-            db_helper.upsert_channel(
-                conn,
-                channel_id=str(channel_id),
-                channel_name=channel_name,
-                user=user_str,
-            )
+            # Try to get channel creator if available
+            # Note: Not all channels expose creator info
+            creator_id = None
+            if hasattr(entity, "creator_id"):
+                creator_id = entity.creator_id
+
+            with get_session(paths.db_file, check_same_thread=False) as session:
+                operations.upsert_channel(
+                    session,
+                    channel_id=str(channel_id),
+                    channel_name=channel_name,
+                    creator_id=creator_id,
+                )
         except Exception as e:
             logger.warning(f"Could not update channel info: {e}")
 
-        if chunk_size == 0:
-            # Return all messages at once (not streamed)
-            messages = []
-            async for batch in stream_messages_with_cache(
-                client,
-                conn,
-                channel_id,
-                start_dt,
-                end_dt,
-                telegram_batch_size=_config.telegram_batch_size,
-                client_batch_size=1000,  # Large chunks internally
-                force_refresh=force_refresh,
-                scrape_media=_config.download_media,
-                max_media_size_mb=_config.max_media_size_mb,
-                output_dir=_config.output_path,
-            ):
-                messages.extend(batch)
+        batch_size = chunk_size
 
-            return {"messages": messages}
-
-        else:
-            # Stream messages in chunks via SSE
-            async def event_stream():
+        async def event_stream():
+            with get_session(paths.db_file, check_same_thread=False) as session:
                 try:
                     async for batch in stream_messages_with_cache(
                         client,
-                        conn,
+                        session,
                         channel_id,
                         start_dt,
                         end_dt,
                         telegram_batch_size=_config.telegram_batch_size,
-                        client_batch_size=chunk_size,
+                        client_batch_size=batch_size,
                         force_refresh=force_refresh,
                         scrape_media=_config.download_media,
                         max_media_size_mb=_config.max_media_size_mb,
@@ -218,10 +206,10 @@ async def get_history(
                     ):
                         yield f"data: {json.dumps({'messages': batch})}\n\n"
                 finally:
-                    # Cleanup database connection
-                    conn.close()
+                    # Session cleanup happens automatically with context manager
+                    pass
 
-            return StreamingResponse(event_stream(), media_type="text/event-stream")
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     except HTTPException:
         raise

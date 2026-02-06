@@ -257,8 +257,9 @@ def main(
 # 2. From uvicorn CLI: uvicorn telegram_scraper.server:app --reload
 # Right now, those 2 ways are not compatible, since you have to create app instance in both cases.
 # And creation / configuration process is different in both cases.
+# MB I should create 2 different entry points for server?
 
 # For development with uvicorn CLI (e.g., uvicorn telegram_scraper.server:app --reload)
 # Configure via environment variables. Use tgsc-server for config file support.
 # if __name__ != "__main__":
-    # app = create_app(load_config())
+# app = create_app(load_config())

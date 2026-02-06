@@ -7,7 +7,8 @@ from pathlib import Path as FilePath
 
 from .auth_utils import get_authenticated_user
 from ..config import ServerConfig
-from .. import db_helper
+from ..database import operations
+from ..database import get_session, channel_db_paths
 
 
 router = APIRouter(prefix="/api/v1", tags=["files"])
@@ -47,22 +48,16 @@ def find_media_by_uuid(media_uuid: str) -> dict:
             continue
 
         # Use canonical path helper to get database file
-        paths = db_helper.channel_db_paths(output_path, channel_dir.name)
+        paths = channel_db_paths(output_path, channel_dir.name)
         if not paths.db_file.exists():
             continue
 
         try:
-            conn = db_helper.open_database(
-                paths.db_file,
-                create_if_missing=False,
-                row_factory=False,
-                check_same_thread=True,
-            )
-            media_info = db_helper.get_media_info_by_uuid(conn, media_uuid)
-            conn.close()
+            with get_session(paths.db_file, check_same_thread=True) as session:
+                media_info = operations.get_media_info_by_uuid(session, media_uuid)
 
-            if media_info:
-                return media_info
+                if media_info:
+                    return media_info
         except Exception:
             # Skip databases with errors
             continue
@@ -99,8 +94,11 @@ async def get_file(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Media file not found on disk")
 
-    # Determine media type for response
-    media_type = media_info.get("mime_type") or "application/octet-stream"
+    # Determine media type for response (use mimetypes to guess from file extension)
+    import mimetypes
+
+    mime_type, _ = mimetypes.guess_type(str(file_path))
+    media_type = mime_type or "application/octet-stream"
 
     return FileResponse(
         path=str(file_path),

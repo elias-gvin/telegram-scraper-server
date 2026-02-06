@@ -27,6 +27,7 @@ async def download_media(
     output_dir: Path,
     channel_id: int,
     max_media_size_mb: Optional[float] = None,
+    force_redownload: bool = False,
 ) -> MediaDownloadResult:
     """
     Download media from a Telegram message.
@@ -59,8 +60,12 @@ async def download_media(
 
         # Check if file already exists
         existing_files = list(media_folder.glob(f"{message.id}-*"))
-        if existing_files:
+        if existing_files and not force_redownload:
             return MediaDownloadResult(status="downloaded", path=str(existing_files[0]))
+        elif existing_files and force_redownload:
+            # Remove old files before re-downloading
+            for f in existing_files:
+                f.unlink(missing_ok=True)
 
         # Check media size limit
         if max_media_size_mb is not None:
