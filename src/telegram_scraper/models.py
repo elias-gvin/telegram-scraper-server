@@ -14,34 +14,39 @@ class MessageData:
     message_id: int
     channel_id: int
 
-    # Extended (not from Telegram API)
-    channel_name: Optional[str] = None
-
     # Timestamps
     date: str  # YYYY-MM-DD HH:MM:SS
-    edit_date: Optional[str]  # YYYY-MM-DD HH:MM:SS or None
 
     # Sender (may be orphaned)
     sender_id: int
-    first_name: Optional[str]
-    last_name: Optional[str]
-    username: Optional[str]
 
     # Content
     message: str
 
     # Context
-    reply_to: Optional[int]
-    post_author: Optional[str]
     is_forwarded: int
-    forwarded_from_channel_id: Optional[int]
+
+    # Extended (not from Telegram API)
+    channel_name: Optional[str] = None
+
+    # Timestamps (optional)
+    edit_date: Optional[str] = None  # YYYY-MM-DD HH:MM:SS or None
+
+    # Sender (optional)
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+
+    # Context (optional)
+    reply_to: Optional[int] = None
+    post_author: Optional[str] = None
+    forwarded_from_channel_id: Optional[int] = None
 
     # Media (filled after download)
-    media_type: Optional[str]  # Telegram class name
-    media_uuid: Optional[str]  # Generated UUID
-    media_path: Optional[str]  # Local file path
-    media_size: Optional[int]  # Bytes
-
+    media_type: Optional[str] = None  # Telegram class name
+    media_uuid: Optional[str] = None  # Generated UUID
+    media_path: Optional[str] = None  # Local file path
+    media_size: Optional[int] = None  # Bytes
 
 
 @dataclass

@@ -133,6 +133,7 @@ async def download_from_telegram_batched(
     scrape_media: bool,
     max_media_size_mb: Optional[float],
     output_dir: Path,
+    force_redownload: bool = False,
 ) -> AsyncIterator[List[MessageData]]:
     """
     Download messages from Telegram in batches and save to DB.
@@ -189,6 +190,7 @@ async def download_from_telegram_batched(
                     output_dir=output_dir,
                     channel_id=channel_id,
                     max_media_size_mb=max_media_size_mb,
+                    force_redownload=force_redownload,
                 )
                 if result.status == "downloaded" and result.path:
                     media_path = result.path
@@ -418,6 +420,7 @@ async def stream_messages_with_cache(
                 scrape_media,
                 max_media_size_mb,
                 output_dir,
+                force_redownload=force_refresh,
             ):
                 # Convert MessageData to dict
                 for msg in telegram_batch:
