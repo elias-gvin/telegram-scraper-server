@@ -104,7 +104,12 @@ async def get_telegram_client(
 
         # Create new client
         session_path = str(_config.sessions_path / username)
-        client = TelegramClient(session_path, _config.api_id, _config.api_hash)
+        client = TelegramClient(
+            session_path,
+            _config.api_id,
+            _config.api_hash,
+            flood_sleep_threshold=120,
+        )
 
         try:
             await client.connect()

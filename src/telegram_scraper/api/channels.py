@@ -5,10 +5,16 @@ from typing import Annotated, Optional, List
 from pydantic import BaseModel
 from enum import Enum
 from difflib import SequenceMatcher
+import logging
+
 from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat
+from telethon.errors import FloodWaitError
 
 from .auth_utils import get_telegram_client
+
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/v1", tags=["channels"])
@@ -79,45 +85,55 @@ async def find_channels(
 
     Requires X-Telegram-Username header for authentication.
     """
-    if search_by == SearchBy.channel_id:
-        # Direct lookup by ID
-        try:
-            channel_id = int(query)
-            entity = await client.get_entity(channel_id)
-            return [entity_to_channel_info(entity)]
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid channel ID: {query}")
-        except Exception as e:
-            raise HTTPException(status_code=404, detail=f"Channel not found: {e}")
+    try:
+        if search_by == SearchBy.channel_id:
+            # Direct lookup by ID
+            try:
+                channel_id = int(query)
+                entity = await client.get_entity(channel_id)
+                return [entity_to_channel_info(entity)]
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid channel ID: {query}"
+                )
 
-    elif search_by == SearchBy.username:
-        # Lookup by username
-        try:
+        elif search_by == SearchBy.username:
+            # Lookup by username
             entity = await client.get_entity(query)
             return [entity_to_channel_info(entity)]
-        except Exception as e:
-            raise HTTPException(status_code=404, detail=f"Channel not found: {e}")
 
-    elif search_by == SearchBy.title:
-        # Fuzzy search in user's dialogs
-        channels = []
-        async for dialog in client.iter_dialogs():
-            entity = dialog.entity
+        elif search_by == SearchBy.title:
+            # Fuzzy search in user's dialogs
+            channels = []
+            async for dialog in client.iter_dialogs():
+                entity = dialog.entity
 
-            # Skip system dialog (Telegram Service Notifications)
-            is_system_dialog = dialog.id == 777000
-            # Only include channels and chats/groups
-            is_channel_or_chat = isinstance(entity, Channel) or isinstance(entity, Chat)
+                # Skip system dialog (Telegram Service Notifications)
+                is_system_dialog = dialog.id == 777000
+                # Only include channels and chats/groups
+                is_channel_or_chat = isinstance(entity, Channel) or isinstance(
+                    entity, Chat
+                )
 
-            if is_system_dialog or not is_channel_or_chat:
-                continue
+                if is_system_dialog or not is_channel_or_chat:
+                    continue
 
-            score = fuzzy_match_score(dialog.title, query)
-            if score >= title_threshold:
-                channels.append(entity_to_channel_info(dialog.entity))
+                score = fuzzy_match_score(dialog.title, query)
+                if score >= title_threshold:
+                    channels.append(entity_to_channel_info(dialog.entity))
 
-        # Sort by match score (best matches first)
-        channels.sort(key=lambda c: fuzzy_match_score(c.title, query), reverse=True)
-        return channels
+            # Sort by match score (best matches first)
+            channels.sort(key=lambda c: fuzzy_match_score(c.title, query), reverse=True)
+            return channels
+
+    except FloodWaitError as e:
+        logger.error("Telegram rate limit in find_channels: retry-after %ds", e.seconds)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Telegram rate limit exceeded. Retry after {e.seconds} seconds.",
+            headers={"Retry-After": str(e.seconds)},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Channel not found: {e}")
 
     return []

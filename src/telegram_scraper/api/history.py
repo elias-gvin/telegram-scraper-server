@@ -9,6 +9,7 @@ import json
 import logging
 
 from telethon import TelegramClient
+from telethon.errors import FloodWaitError
 
 from .auth_utils import get_telegram_client
 from ..config import ServerConfig
@@ -213,6 +214,13 @@ async def get_history(
 
     except HTTPException:
         raise
+    except FloodWaitError as e:
+        logger.error("Telegram rate limit in get_history: retry-after %ds", e.seconds)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Telegram rate limit exceeded. Retry after {e.seconds} seconds.",
+            headers={"Retry-After": str(e.seconds)},
+        )
     except Exception as e:
         logger.error(f"Error in get_history: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
