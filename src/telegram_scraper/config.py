@@ -24,8 +24,8 @@ class ServerConfig:
     telegram_batch_size: int = 100  # Internal download chunk size
 
     # Storage
-    output_path: Path = field(default_factory=lambda: Path("./output"))
-    sessions_path: Path = field(default_factory=lambda: Path("./sessions"))
+    output_path: Path = field(default_factory=lambda: Path("./data/output"))
+    sessions_path: Path = field(default_factory=lambda: Path("./data/sessions"))
 
     # Server settings
     host: str = "0.0.0.0"

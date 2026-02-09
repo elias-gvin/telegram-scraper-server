@@ -73,8 +73,8 @@ api_id: "YOUR_API_ID"
 api_hash: "YOUR_API_HASH"
 download_media: true
 max_media_size_mb: 50
-output_path: "./output"
-sessions_path: "./sessions"
+output_path: "./data/output"
+sessions_path: "./data/sessions"
 host: "0.0.0.0"
 port: 8000
 ```
@@ -225,8 +225,8 @@ api_hash: "YOUR_API_HASH"
 download_media: true
 max_media_size_mb: 50
 telegram_batch_size: 100
-output_path: "./output"
-sessions_path: "./sessions"
+output_path: "./data/output"
+sessions_path: "./data/sessions"
 host: "0.0.0.0"
 port: 8000
 ```

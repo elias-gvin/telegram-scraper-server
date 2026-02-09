@@ -144,14 +144,14 @@ def create_app(config: ServerConfig) -> FastAPI:
 @click.option(
     "--output-path",
     type=click.Path(path_type=Path),
-    default="./output",
-    help="Output directory for cache and media (default: ./output)",
+    default="./data/output",
+    help="Output directory for cache and media (default: ./data/output)",
 )
 @click.option(
     "--sessions-path",
     type=click.Path(path_type=Path),
-    default="./sessions",
-    help="Directory for Telegram session files (default: ./sessions)",
+    default="./data/sessions",
+    help="Directory for Telegram session files (default: ./data/sessions)",
 )
 @click.option(
     "--host",

@@ -12,8 +12,8 @@ max_media_size_mb: 20  # Maximum media file size in MB (null for no limit)
 telegram_batch_size: 100  # Internal batch size for downloading from Telegram
 
 # Storage paths
-output_path: "./output"  # Directory for cache databases and media files
-sessions_path: "./sessions"  # Directory for Telegram session files
+output_path: "./data/output"  # Directory for cache databases and media files
+sessions_path: "./data/sessions"  # Directory for Telegram session files
 
 # Server settings
 host: "0.0.0.0"  # Server host (0.0.0.0 for all interfaces)

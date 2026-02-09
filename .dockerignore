@@ -17,8 +17,7 @@ venv
 .idea
 
 # Runtime data (will be mounted as volumes)
-output/
-sessions/
+data/
 config.yaml
 
 # Docker
