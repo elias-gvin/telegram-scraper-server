@@ -331,8 +331,8 @@ def iter_messages_in_range(
             .join(User, Message.sender_id == User.user_id, isouter=True)
             .where(
                 Message.channel_id == int(channel_id),
-                Message.date >= start_date.isoformat(),
-                Message.date <= end_date.isoformat(),
+                Message.date >= start_date.strftime("%Y-%m-%d %H:%M:%S"),
+                Message.date <= end_date.strftime("%Y-%m-%d %H:%M:%S"),
             )
             .order_by(Message.date)
             .offset(offset)
