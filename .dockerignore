@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[codz]
+*.egg-info
+.venv
+venv
+.ruff_cache
+.pytest_cache
+.mypy_cache
+
+# IDE
+.vscode
+.idea
+
+# Runtime data (will be mounted as volumes)
+output/
+sessions/
+config.yaml
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Docs
+LICENSE
+

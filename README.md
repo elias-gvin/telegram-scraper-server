@@ -18,11 +18,34 @@ FastAPI-based server for scraping and caching Telegram messages with streaming s
 ### Installation
 
 ```bash
-# Clone the repository
-cd telegram_scraper
+# Install with Poetry
+poetry install
 
-# Install with pip
+# Or with pip
 pip install -e .
+```
+
+### Docker
+
+```bash
+docker build -t telegram-scraper-server .
+
+docker run -d -p 8000:8000 \
+  -e TELEGRAM_API_ID=YOUR_API_ID \
+  -e TELEGRAM_API_HASH=YOUR_API_HASH \
+  -v ./data:/app/data \
+  telegram-scraper-server
+```
+
+Sessions and cached data are stored in `/app/data` inside the container — mount it to persist across restarts.
+
+You can also mount a config file instead of using env vars:
+
+```bash
+docker run -d -p 8000:8000 \
+  -v ./config.yaml:/app/config.yaml:ro \
+  -v ./data:/app/data \
+  telegram-scraper-server --config /app/config.yaml
 ```
 
 ### Prerequisites
