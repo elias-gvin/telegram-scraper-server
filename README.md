@@ -58,11 +58,74 @@ port: 8000
 
 **2. Authenticate a user:**
 
+**Option A: CLI (interactive)**
+
 ```bash
 tgsc-auth john_doe --config config.yaml
 ```
 
-Follow the prompts to enter your phone and verification code.
+Follow the prompts to scan a QR code or enter your phone number.
+
+**Option B: API (web-based QR login)**
+
+Start the server first (step 3), then authenticate via API:
+
+```bash
+# Start a QR login session
+curl -X POST http://localhost:8000/api/v2/auth/qr \
+  -H "Content-Type: application/json" \
+  -d '{"username": "john_doe"}'
+# → {"token": "abc123...", "qr_url": "tg://login?token=...", ...}
+
+# Poll for status (qr_url auto-refreshes every ~25s — re-render it each time)
+curl http://localhost:8000/api/v2/auth/qr/{token}
+# → {"status": "pending", "qr_url": "tg://login?token=FRESH...", ...}
+
+# If 2FA is enabled (status == "password_required"):
+curl -X POST http://localhost:8000/api/v2/auth/qr/{token}/2fa \
+  -H "Content-Type: application/json" \
+  -d '{"password": "your_2fa_password"}'
+```
+
+Render the `qr_url` as a QR code, then scan it in **Telegram → Settings → Devices → Link Desktop Device**.
+
+Use `"force": true` in the POST body to re-authenticate an existing session.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant T as Telegram
+
+    C->>S: POST /auth/qr {"username":"john_doe"}
+    S->>T: connect + qr_login()
+    T-->>S: login token
+    S-->>C: {token, qr_url}
+
+    loop Every 2-3s
+        C->>S: GET /auth/qr/{token}
+        S-->>C: {status: pending, qr_url}
+    end
+
+    Note over S,T: Background: recreate() every ~25s to keep QR fresh
+
+    Note over C: User scans QR on phone
+    T-->>S: scan confirmed
+
+    alt 2FA enabled
+        C->>S: GET /auth/qr/{token}
+        S-->>C: {status: password_required}
+        C->>S: POST /auth/qr/{token}/2fa {"password":"***"}
+        S->>T: sign_in(password)
+        T-->>S: authorized
+        S-->>C: {status: success}
+    else No 2FA
+        C->>S: GET /auth/qr/{token}
+        S-->>C: {status: success}
+    end
+
+    Note over C,S: Session saved. Use X-Telegram-Username header for all API calls.
+```
 
 **3. Start the server:**
 

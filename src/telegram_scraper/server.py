@@ -10,8 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import load_config, ServerConfig
 from fastapi import APIRouter
-from .api import dialogs_router, history_router, files_router, API_PREFIX
+from .api import dialogs_router, history_router, files_router, auth_router, API_PREFIX
 from .api import auth_utils as api_auth
+from .api import auth as api_qr_auth
 from .api import history as api_history
 from .api import files as api_files
 
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI):
     """
     yield
     logger.info("Shutting down server, cleaning up Telegram clients...")
+    await api_qr_auth.cleanup_qr_sessions()
     await api_auth.cleanup_clients()
     logger.info("Cleanup complete")
 
@@ -66,6 +68,7 @@ def create_app(config: ServerConfig) -> FastAPI:
 
     # Set config in API modules
     api_auth.set_config(config)
+    api_qr_auth.set_config(config)
     api_history.set_config(config)
     api_files.set_config(config)
 
@@ -74,6 +77,7 @@ def create_app(config: ServerConfig) -> FastAPI:
     api_router.include_router(dialogs_router)
     api_router.include_router(history_router)
     api_router.include_router(files_router)
+    api_router.include_router(auth_router)
     app.include_router(api_router)
 
     @app.get("/", tags=["root"])
@@ -84,6 +88,8 @@ def create_app(config: ServerConfig) -> FastAPI:
             "version": "1.0.0",
             "docs": "/docs",
             "endpoints": {
+                "auth_qr_start": f"{API_PREFIX}/auth/qr",
+                "auth_qr_status": f"{API_PREFIX}/auth/qr/{{token}}",
                 "search_dialogs": f"{API_PREFIX}/search/dialogs",
                 "folders": f"{API_PREFIX}/folders",
                 "history": f"{API_PREFIX}/history/{{channel_id}}",

@@ -132,6 +132,20 @@ async def get_telegram_client(
             raise
 
 
+async def evict_client(username: str):
+    """
+    Remove a single user's client from the pool and disconnect it.
+
+    Used when force re-authenticating to ensure the old session is fully released.
+    """
+    async with _pool_lock:
+        client = _client_pool.pop(username, None)
+        _client_locks.pop(username, None)
+
+    if client is not None and client.is_connected():
+        await client.disconnect()
+
+
 async def cleanup_clients():
     """
     Cleanup all pooled Telegram clients.
