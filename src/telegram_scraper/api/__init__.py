@@ -4,4 +4,13 @@ from .dialogs import router as dialogs_router
 from .history import router as history_router
 from .files import router as files_router
 
-__all__ = ["dialogs_router", "history_router", "files_router"]
+API_VERSION = "v1"
+API_PREFIX = f"/api/{API_VERSION}"
+
+__all__ = [
+    "dialogs_router",
+    "history_router",
+    "files_router",
+    "API_VERSION",
+    "API_PREFIX",
+]

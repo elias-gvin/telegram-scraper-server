@@ -11,7 +11,7 @@ from ..database import operations
 from ..database import get_session, channel_db_paths
 
 
-router = APIRouter(prefix="/api/v1", tags=["files"])
+router = APIRouter(tags=["files"])
 
 
 # Global config (will be set by server.py)

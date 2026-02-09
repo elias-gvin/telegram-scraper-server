@@ -9,7 +9,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import load_config, ServerConfig
-from .api import dialogs_router, history_router, files_router
+from fastapi import APIRouter
+from .api import dialogs_router, history_router, files_router, API_PREFIX
 from .api import auth_utils as api_auth
 from .api import history as api_history
 from .api import files as api_files
@@ -68,10 +69,12 @@ def create_app(config: ServerConfig) -> FastAPI:
     api_history.set_config(config)
     api_files.set_config(config)
 
-    # Include routers
-    app.include_router(dialogs_router)
-    app.include_router(history_router)
-    app.include_router(files_router)
+    # Include routers under versioned prefix
+    api_router = APIRouter(prefix=API_PREFIX)
+    api_router.include_router(dialogs_router)
+    api_router.include_router(history_router)
+    api_router.include_router(files_router)
+    app.include_router(api_router)
 
     @app.get("/", tags=["root"])
     async def root():
@@ -81,10 +84,10 @@ def create_app(config: ServerConfig) -> FastAPI:
             "version": "1.0.0",
             "docs": "/docs",
             "endpoints": {
-                "search_dialogs": "/api/v1/search/dialogs",
-                "folders": "/api/v1/folders",
-                "history": "/api/v1/history/{channel_id}",
-                "files": "/api/v1/files/{file_uuid}",
+                "search_dialogs": f"{API_PREFIX}/search/dialogs",
+                "folders": f"{API_PREFIX}/folders",
+                "history": f"{API_PREFIX}/history/{{channel_id}}",
+                "files": f"{API_PREFIX}/files/{{file_uuid}}",
             },
         }
 

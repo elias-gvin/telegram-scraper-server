@@ -23,7 +23,7 @@ from ..database import (
 from ..scraper import stream_messages_with_cache
 
 
-router = APIRouter(prefix="/api/v1", tags=["history"])
+router = APIRouter(tags=["history"])
 logger = logging.getLogger(__name__)
 
 

@@ -18,7 +18,7 @@ from .auth_utils import get_telegram_client
 logger = logging.getLogger(__name__)
 
 
-router = APIRouter(prefix="/api/v1", tags=["dialogs"])
+router = APIRouter(tags=["dialogs"])
 
 
 # ---------------------------------------------------------------------------
