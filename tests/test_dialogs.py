@@ -212,6 +212,24 @@ class TestSearchDialogs:
             assert r["message_count"] >= 100
 
     @pytest.mark.asyncio
+    async def test_message_count_uses_real_count_not_message_id(
+        self, client, mock_client
+    ):
+        """message_count must come from get_messages().total, NOT from the
+        top message ID. Regression test for the 884218-instead-of-400 bug."""
+        # Override the count for entity 300 (Family Group, msg.id=50) to 42
+        mock_client._message_counts[300] = 42
+        resp = await client.get(
+            "/api/v2/search/dialogs", params={"q": "Family", "match": "exact"}
+        )
+        data = resp.json()
+        assert data["total"] == 1
+        result = data["results"][0]
+        assert result["title"] == "Family Group"
+        # Without the fix this would return 50 (the message ID)
+        assert result["message_count"] == 42
+
+    @pytest.mark.asyncio
     async def test_sort_by_title_asc(self, client):
         resp = await client.get(
             "/api/v2/search/dialogs",

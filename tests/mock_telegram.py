@@ -111,6 +111,14 @@ class FakeDialog:
 # ---------------------------------------------------------------------------
 
 
+class FakeTotalList(list):
+    """Mimics Telethon's TotalList returned by client.get_messages()."""
+
+    def __init__(self, *args, total: int = 0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.total = total
+
+
 @dataclass
 class FakeDialogFilterTitle:
     text: str
@@ -161,6 +169,9 @@ class MockTelegramClient:
         self._me = me or FakeUser(id=999, first_name="Test", username="testuser")
         self._folders = folders or []
         self._messages_by_channel: dict[int, List[FakeMessage]] = {}
+        # Explicit overrides for message counts returned by get_messages().
+        # If not set for an entity, falls back to the dialog's top message ID.
+        self._message_counts: dict[int, int] = {}
 
     # -- helpers for test setup --
 
@@ -179,6 +190,29 @@ class MockTelegramClient:
     async def iter_dialogs(self, **kwargs):
         for d in self.dialogs:
             yield d
+
+    async def get_messages(self, entity, limit=0, **kwargs):
+        """Mimics client.get_messages(). With limit=0, returns an empty
+        FakeTotalList whose .total is the real message count."""
+        entity_id = entity.id if hasattr(entity, "id") else entity
+        # Explicit override takes priority
+        if entity_id in self._message_counts:
+            count = self._message_counts[entity_id]
+        else:
+            # Fall back to the dialog's top message ID (for backward compat)
+            count = 0
+            for d in self.dialogs:
+                if d.entity.id == entity_id and d.message:
+                    count = d.message.id
+                    break
+        if limit == 0:
+            return FakeTotalList(total=count)
+        # Non-zero limit: return actual messages from the channel store
+        msgs = self._messages_by_channel.get(entity_id, self.messages)[:limit]
+        result = FakeTotalList(
+            msgs, total=len(self._messages_by_channel.get(entity_id, self.messages))
+        )
+        return result
 
     async def iter_messages(self, entity, offset_date=None, reverse=False, **kwargs):
         entity_id = entity.id if hasattr(entity, "id") else entity

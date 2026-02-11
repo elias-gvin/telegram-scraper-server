@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from enum import Enum
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
+import asyncio
 import logging
 
 from telethon import TelegramClient
@@ -77,7 +78,7 @@ class DialogInfo(BaseModel):
     is_creator: bool = False
     is_verified: bool = False
     is_archived: bool = False
-    message_count: Optional[int] = None  # approximate, from top message ID
+    message_count: Optional[int] = None  # actual count fetched via messages.getHistory
     unread_count: int = 0
     participants_count: Optional[int] = None
     last_message_date: Optional[str] = None  # ISO 8601
@@ -163,9 +164,6 @@ def _dialog_to_info(dialog, my_id: int) -> DialogInfo:
     else:
         title = getattr(entity, "title", "") or str(entity.id)
 
-    # Approximate message count from top message ID
-    message_count = dialog.message.id if dialog.message else None
-
     # Last message metadata
     last_message_date = dialog.date.isoformat() if dialog.date else None
     last_message_preview = None
@@ -187,7 +185,7 @@ def _dialog_to_info(dialog, my_id: int) -> DialogInfo:
         is_creator=getattr(entity, "creator", False) or False,
         is_verified=getattr(entity, "verified", False) or False,
         is_archived=dialog.archived,
-        message_count=message_count,
+        message_count=None, # message_count will be filled later from messages.getHistory
         unread_count=dialog.unread_count or 0,
         participants_count=getattr(entity, "participants_count", None),
         last_message_date=last_message_date,
@@ -408,7 +406,7 @@ async def search_dialogs(
         # Determine whether to sort by score (when fuzzy search is active)
         sort_by_score = q is not None and match == MatchMode.fuzzy
 
-        scored_results: list[tuple[float, DialogInfo]] = []
+        scored_results: list[tuple[float, DialogInfo, object]] = []
 
         iter_kwargs = {}
         if folder_id is not None:
@@ -499,26 +497,41 @@ async def search_dialogs(
                     continue
 
             info = _dialog_to_info(dialog, my_id)
-            scored_results.append((score, info))
+            scored_results.append((score, info, dialog.entity))
 
         # --- Sort ---
         if sort_by_score:
             # Primary: score descending, then by chosen sort field as tiebreaker
             scored_results.sort(
-                key=lambda pair: (-pair[0], _sort_key(pair[1], sort)),
+                key=lambda triple: (-triple[0], _sort_key(triple[1], sort)),
             )
         else:
             reverse = order == SortOrder.desc
             scored_results.sort(
-                key=lambda pair: _sort_key(pair[1], sort),
+                key=lambda triple: _sort_key(triple[1], sort),
                 reverse=reverse,
             )
 
-        all_results = [info for _, info in scored_results]
-        total = len(all_results)
+        all_infos = [info for _, info, _ in scored_results]
+        all_entities = [entity for _, _, entity in scored_results]
+        total = len(all_infos)
 
         # --- Paginate ---
-        page = all_results[offset : offset + limit]
+        page = all_infos[offset : offset + limit]
+        page_entities = all_entities[offset : offset + limit]
+
+        # --- Fetch actual message counts for the page ---
+        async def _get_count(entity):
+            try:
+                result = await client.get_messages(entity, limit=0)
+                return result.total
+            except Exception:
+                return None
+
+        counts = await asyncio.gather(*[_get_count(e) for e in page_entities])
+        for info, count in zip(page, counts):
+            if count is not None:
+                info.message_count = count
 
         return DialogSearchResponse(
             total=total,
