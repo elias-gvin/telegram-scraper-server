@@ -86,6 +86,22 @@ class TestFileServing:
         assert "image/jpeg" in resp.headers["content-type"]
 
     @pytest.mark.asyncio
+    async def test_metadata_only_returns_json(self, client, media_uuid):
+        resp = await client.get(f"/api/v2/files/{media_uuid}?metadata_only=true")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "file_path" in data
+        assert "filename" in data
+        assert "size" in data
+        assert data["filename"] == "1-photo.jpg"
+        assert data["size"] > 0
+
+    @pytest.mark.asyncio
+    async def test_metadata_only_not_found(self, client):
+        resp = await client.get("/api/v2/files/nonexistent-uuid-1234?metadata_only=true")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
     async def test_not_found_uuid(self, client):
         resp = await client.get("/api/v2/files/nonexistent-uuid-1234")
         assert resp.status_code == 404
