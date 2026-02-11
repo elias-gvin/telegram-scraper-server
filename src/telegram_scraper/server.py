@@ -10,11 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import load_config, ServerConfig
 from fastapi import APIRouter
-from .api import dialogs_router, history_router, files_router, auth_router, API_PREFIX
+from .api import dialogs_router, history_router, files_router, auth_router, settings_router, API_PREFIX
 from .api import auth_utils as api_auth
 from .api import auth as api_qr_auth
 from .api import history as api_history
 from .api import files as api_files
+from .api import settings as api_settings
 
 from contextlib import asynccontextmanager
 
@@ -71,6 +72,7 @@ def create_app(config: ServerConfig) -> FastAPI:
     api_qr_auth.set_config(config)
     api_history.set_config(config)
     api_files.set_config(config)
+    api_settings.set_config(config)
 
     # Include routers under versioned prefix
     api_router = APIRouter(prefix=API_PREFIX)
@@ -78,6 +80,7 @@ def create_app(config: ServerConfig) -> FastAPI:
     api_router.include_router(history_router)
     api_router.include_router(files_router)
     api_router.include_router(auth_router)
+    api_router.include_router(settings_router)
     app.include_router(api_router)
 
     @app.get("/", tags=["root"])
@@ -94,6 +97,7 @@ def create_app(config: ServerConfig) -> FastAPI:
                 "folders": f"{API_PREFIX}/folders",
                 "history": f"{API_PREFIX}/history/{{channel_id}}",
                 "files": f"{API_PREFIX}/files/{{file_uuid}}",
+                "settings": f"{API_PREFIX}/settings",
             },
         }
 

@@ -31,12 +31,17 @@ class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8000
 
+    # Internal: path to the YAML config file (not serialized)
+    config_path: Optional[Path] = field(default=None, repr=False)
+
     def __post_init__(self):
         """Convert string paths to Path objects."""
         if isinstance(self.output_path, str):
             self.output_path = Path(self.output_path)
         if isinstance(self.sessions_path, str):
             self.sessions_path = Path(self.sessions_path)
+        if isinstance(self.config_path, str):
+            self.config_path = Path(self.config_path)
 
         # Create directories if they don't exist
         self.output_path.mkdir(parents=True, exist_ok=True)
@@ -132,4 +137,35 @@ def load_config(
             "via config file, environment variables, or CLI parameters"
         )
 
-    return ServerConfig(**config_data)
+    server_config = ServerConfig(**config_data)
+    server_config.config_path = config_path
+    return server_config
+
+
+def save_config_to_yaml(config: ServerConfig) -> None:
+    """
+    Persist current configuration back to the YAML file.
+
+    Only saves fields that belong in the config file (excludes config_path).
+    Raises ValueError if no config_path is set.
+    """
+    if not config.config_path:
+        raise ValueError("No config file path set — cannot persist changes")
+
+    data = {
+        "api_id": config.api_id,
+        "api_hash": config.api_hash,
+        "download_media": config.download_media,
+        "max_media_size_mb": config.max_media_size_mb,
+        "telegram_batch_size": config.telegram_batch_size,
+        "output_path": str(config.output_path),
+        "sessions_path": str(config.sessions_path),
+        "host": config.host,
+        "port": config.port,
+    }
+
+    with open(config.config_path, "w") as f:
+        # Write a human-friendly header
+        f.write("# Telegram Scraper API Server Configuration\n")
+        f.write("# Copy this file to config.yaml and fill in your credentials\n\n")
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
