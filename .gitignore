@@ -221,4 +221,3 @@ __marimo__/
 # Sessions and output directories
 *.session
 data/
-config.yaml

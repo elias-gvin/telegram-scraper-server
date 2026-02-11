@@ -47,7 +47,7 @@ async def get_authenticated_user(
         )
 
     # Check if user has valid Telegram session
-    session_file = _config.sessions_path / f"{x_telegram_username}.session"
+    session_file = _config.sessions_dir / f"{x_telegram_username}.session"
     if not session_file.exists():
         raise HTTPException(
             status_code=401,
@@ -103,7 +103,7 @@ async def get_telegram_client(
                     del _client_pool[username]
 
         # Create new client
-        session_path = str(_config.sessions_path / username)
+        session_path = str(_config.sessions_dir / username)
         client = TelegramClient(
             session_path,
             _config.api_id,

@@ -2,17 +2,17 @@
 
 Allows clients to read and update runtime configuration parameters
 such as download_media, max_media_size_mb, and telegram_batch_size.
-Changes are applied immediately. Pass ``persist=true`` to also save to config.yaml.
+Changes are applied immediately and saved to settings.yaml.
 """
 
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .auth_utils import get_authenticated_user
-from ..config import ServerConfig, save_config_to_yaml
+from ..config import ServerConfig, save_settings
 
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -97,11 +97,9 @@ async def get_settings(
     description="""
     Partially update server settings. Only supplied fields are changed.
 
-    Changes take effect immediately. Pass `?persist=true` as a query
-    parameter to also write changes to `config.yaml` so they survive
-    server restarts.
+    Changes take effect immediately and are saved to settings.yaml.
 
-    Accepted body fields:
+    Accepted fields:
     - `download_media` — enable / disable media download
     - `max_media_size_mb` — max media size in MB (`0` or `null` → no limit)
     - `telegram_batch_size` — batch size for Telegram downloads (must be > 0)
@@ -109,10 +107,6 @@ async def get_settings(
 )
 async def update_settings(
     body: SettingsUpdate,
-    persist: bool = Query(
-        default=False,
-        description="If true, also save changes to config.yaml so they survive restarts",
-    ),
     username: str = Depends(get_authenticated_user),
 ):
     if _config is None:
@@ -139,13 +133,12 @@ async def update_settings(
     if body.telegram_batch_size is not None:
         _config.telegram_batch_size = body.telegram_batch_size
 
-    # Persist to YAML only when explicitly requested
-    if persist and _config.config_path:
-        try:
-            save_config_to_yaml(_config)
-            logger.info("Settings persisted to %s", _config.config_path)
-        except Exception:
-            logger.exception("Failed to persist settings to config file")
+    # Persist to settings.yaml
+    try:
+        save_settings(_config)
+        logger.info("Settings saved to %s", _config.settings_path)
+    except Exception:
+        logger.exception("Failed to save settings to file")
 
     logger.info("Settings updated by %s: %s", username, update_data)
 
@@ -154,4 +147,3 @@ async def update_settings(
         max_media_size_mb=_config.max_media_size_mb,
         telegram_batch_size=_config.telegram_batch_size,
     )
-

@@ -42,7 +42,7 @@ def media_uuid(server_config):
     """
     Create a fake channel DB + media file on disk and return the UUID.
     """
-    paths = ensure_channel_directories(server_config.output_path, CHANNEL_ID)
+    paths = ensure_channel_directories(server_config.channels_dir, CHANNEL_ID)
     engine = get_engine(paths.db_file)
     create_db_and_tables(engine)
 

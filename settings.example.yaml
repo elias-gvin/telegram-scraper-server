@@ -1,0 +1,7 @@
+# Telegram Scraper — Runtime Settings
+# These values can be changed via the /settings API endpoint.
+
+download_media: true
+max_media_size_mb: 20
+telegram_batch_size: 100
+

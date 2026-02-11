@@ -156,7 +156,7 @@ class TestHistoryCaching:
         assert len(api_msgs) > 0
 
         # Verify directly in SQLite
-        paths = channel_db_paths(server_config.output_path, CHANNEL_ID)
+        paths = channel_db_paths(server_config.channels_dir, CHANNEL_ID)
         with get_session(paths.db_file) as session:
             from sqlmodel import select
 

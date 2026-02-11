@@ -264,7 +264,7 @@ async def start_qr_auth(body: QRStartRequest):
         raise HTTPException(status_code=400, detail="username must not be empty")
 
     # Check if user already has a valid session
-    session_file = _config.sessions_path / f"{username}.session"
+    session_file = _config.sessions_dir / f"{username}.session"
     if session_file.exists():
         if not body.force:
             raise HTTPException(
@@ -278,7 +278,7 @@ async def start_qr_auth(body: QRStartRequest):
         logger.info("Force re-auth: removed existing session for '%s'", username)
 
     # Create a temporary Telegram client for this auth flow
-    session_path = str(_config.sessions_path / username)
+    session_path = str(_config.sessions_dir / username)
     client = TelegramClient(session_path, _config.api_id, _config.api_hash)
 
     try:
@@ -424,7 +424,7 @@ async def cancel_qr_auth(token: str):
     await session.cleanup()
 
     # Remove the partial session file if auth didn't complete
-    session_file = _config.sessions_path / f"{session.username}.session"
+    session_file = _config.sessions_dir / f"{session.username}.session"
     if session_file.exists() and session.status != QRStatus.success:
         session_file.unlink(missing_ok=True)
 
@@ -442,7 +442,7 @@ async def cleanup_qr_sessions():
         await session.cleanup()
         # Remove partial session files
         if session.status != QRStatus.success:
-            session_file = _config.sessions_path / f"{session.username}.session"
+            session_file = _config.sessions_dir / f"{session.username}.session"
             if session_file.exists():
                 session_file.unlink(missing_ok=True)
     _qr_sessions.clear()

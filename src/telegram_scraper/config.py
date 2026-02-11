@@ -1,171 +1,197 @@
-"""Configuration management for Telegram Scraper API Server."""
+"""Configuration management for Telegram Scraper API Server.
+
+Configuration sources (no overlap):
+- api_id, api_hash  → env vars / .env only
+- data_dir          → CLI --data-dir (default ./data)
+- host, port        → CLI --host / --port
+- settings file     → CLI --settings or {data_dir}/settings.yaml
+- download_media, max_media_size_mb, telegram_batch_size → settings.yaml
+"""
 
 from __future__ import annotations
 
+import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass, field
+
 from dotenv import load_dotenv
 import yaml
 
 
+logger = logging.getLogger(__name__)
+
+# Default values for runtime-tunable settings
+SETTINGS_DEFAULTS = {
+    "download_media": True,
+    "max_media_size_mb": 20,
+    "telegram_batch_size": 100,
+}
+
+
 @dataclass
 class ServerConfig:
-    """Server configuration with defaults."""
+    """Server configuration."""
 
-    # Telegram API credentials
+    # Telegram API credentials (from env vars)
     api_id: str
     api_hash: str
 
-    # Download settings
-    download_media: bool = True
-    max_media_size_mb: Optional[float] = None  # None = no limit
-    telegram_batch_size: int = 100  # Internal download chunk size
+    # Data directory (from CLI)
+    data_dir: Path = field(default_factory=lambda: Path("./data"))
 
-    # Storage
-    output_path: Path = field(default_factory=lambda: Path("./data/output"))
-    sessions_path: Path = field(default_factory=lambda: Path("./data/sessions"))
-
-    # Server settings
+    # Server settings (from CLI)
     host: str = "0.0.0.0"
     port: int = 8000
 
-    # Internal: path to the YAML config file (not serialized)
-    config_path: Optional[Path] = field(default=None, repr=False)
+    # Runtime-tunable settings (from settings.yaml)
+    download_media: bool = True
+    max_media_size_mb: Optional[float] = 20  # None = no limit
+    telegram_batch_size: int = 100
+
+    # Internal: path to the active settings.yaml file
+    settings_path: Optional[Path] = field(default=None, repr=False)
 
     def __post_init__(self):
-        """Convert string paths to Path objects."""
-        if isinstance(self.output_path, str):
-            self.output_path = Path(self.output_path)
-        if isinstance(self.sessions_path, str):
-            self.sessions_path = Path(self.sessions_path)
-        if isinstance(self.config_path, str):
-            self.config_path = Path(self.config_path)
+        """Convert string paths and create directories."""
+        if isinstance(self.data_dir, str):
+            self.data_dir = Path(self.data_dir)
+        if isinstance(self.settings_path, str):
+            self.settings_path = Path(self.settings_path)
 
-        # Create directories if they don't exist
-        self.output_path.mkdir(parents=True, exist_ok=True)
-        self.sessions_path.mkdir(parents=True, exist_ok=True)
+        # Create directory structure
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.channels_dir.mkdir(parents=True, exist_ok=True)
+        self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def channels_dir(self) -> Path:
+        """Directory for per-channel databases and media."""
+        return self.data_dir / "channels"
 
-def load_config_from_yaml(config_path: Path) -> dict:
-    """Load configuration from YAML file."""
-    if not config_path.exists():
-        return {}
-
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f) or {}
-
-
-def load_config_from_env() -> dict:
-    """Load configuration from environment variables."""
-    config = {}
-
-    # Telegram credentials
-    if api_id := os.getenv("TELEGRAM_API_ID"):
-        config["api_id"] = api_id
-    if api_hash := os.getenv("TELEGRAM_API_HASH"):
-        config["api_hash"] = api_hash
-
-    # Download settings
-    if download_media := os.getenv("DOWNLOAD_MEDIA"):
-        config["download_media"] = download_media.lower() in ("true", "1", "yes")
-    if max_media_size := os.getenv("MAX_MEDIA_SIZE_MB"):
-        try:
-            config["max_media_size_mb"] = float(max_media_size)
-        except ValueError:
-            pass
-    if batch_size := os.getenv("TELEGRAM_BATCH_SIZE"):
-        try:
-            config["telegram_batch_size"] = int(batch_size)
-        except ValueError:
-            pass
-
-    # Storage paths
-    if output_path := os.getenv("OUTPUT_PATH"):
-        config["output_path"] = output_path
-    if sessions_path := os.getenv("SESSIONS_PATH"):
-        config["sessions_path"] = sessions_path
-
-    # Server settings
-    if host := os.getenv("SERVER_HOST"):
-        config["host"] = host
-    if port := os.getenv("SERVER_PORT"):
-        try:
-            config["port"] = int(port)
-        except ValueError:
-            pass
-
-    return config
+    @property
+    def sessions_dir(self) -> Path:
+        """Directory for Telegram session files."""
+        return self.data_dir / "sessions"
 
 
-def load_config(
-    config_path: Optional[Path] = None, cli_overrides: Optional[dict] = None
-) -> ServerConfig:
+def load_credentials_from_env() -> dict:
     """
-    Load configuration with priority: CLI > ENV > YAML > Defaults
-
-    Args:
-        config_path: Path to YAML config file
-        cli_overrides: Dict of CLI parameter overrides
+    Load Telegram API credentials from environment variables / .env file.
 
     Returns:
-        ServerConfig instance
+        Dict with api_id and api_hash (if found).
+
+    Raises:
+        ValueError if credentials are missing.
     """
     load_dotenv()
 
-    # Start with empty dict
-    config_data = {}
+    creds = {}
+    if api_id := os.getenv("TELEGRAM_API_ID"):
+        creds["api_id"] = api_id
+    if api_hash := os.getenv("TELEGRAM_API_HASH"):
+        creds["api_hash"] = api_hash
 
-    # 1. Load from YAML (lowest priority)
-    if config_path:
-        yaml_config = load_config_from_yaml(config_path)
-        config_data.update(yaml_config)
-
-    # 2. Override with environment variables
-    env_config = load_config_from_env()
-    config_data.update(env_config)
-
-    # 3. Override with CLI parameters (highest priority)
-    if cli_overrides:
-        config_data.update({k: v for k, v in cli_overrides.items() if v is not None})
-
-    # Validate required fields
-    if "api_id" not in config_data or "api_hash" not in config_data:
+    if "api_id" not in creds or "api_hash" not in creds:
         raise ValueError(
-            "Missing required configuration: api_id and api_hash must be provided "
-            "via config file, environment variables, or CLI parameters"
+            "Missing Telegram API credentials.\n"
+            "Set TELEGRAM_API_ID and TELEGRAM_API_HASH as environment variables\n"
+            "or in a .env file in the project root.\n\n"
+            "Get credentials at https://my.telegram.org/apps"
         )
 
-    server_config = ServerConfig(**config_data)
-    server_config.config_path = config_path
-    return server_config
+    return creds
 
 
-def save_config_to_yaml(config: ServerConfig) -> None:
+def load_settings(settings_path: Path) -> dict:
+    """Load runtime-tunable settings from a YAML file."""
+    with open(settings_path, "r") as f:
+        data = yaml.safe_load(f) or {}
+
+    # Only extract known tunable keys
+    result = {}
+    if "download_media" in data:
+        result["download_media"] = bool(data["download_media"])
+    if "max_media_size_mb" in data:
+        val = data["max_media_size_mb"]
+        result["max_media_size_mb"] = None if val is None else float(val)
+    if "telegram_batch_size" in data:
+        result["telegram_batch_size"] = int(data["telegram_batch_size"])
+
+    return result
+
+
+def save_settings(config: ServerConfig) -> None:
     """
-    Persist current configuration back to the YAML file.
+    Persist runtime-tunable settings to settings.yaml.
 
-    Only saves fields that belong in the config file (excludes config_path).
-    Raises ValueError if no config_path is set.
+    Writes only the 3 tunable params — no secrets, no infrastructure.
     """
-    if not config.config_path:
-        raise ValueError("No config file path set — cannot persist changes")
+    if not config.settings_path:
+        logger.warning("No settings_path set — cannot persist settings")
+        return
 
     data = {
-        "api_id": config.api_id,
-        "api_hash": config.api_hash,
         "download_media": config.download_media,
         "max_media_size_mb": config.max_media_size_mb,
         "telegram_batch_size": config.telegram_batch_size,
-        "output_path": str(config.output_path),
-        "sessions_path": str(config.sessions_path),
-        "host": config.host,
-        "port": config.port,
     }
 
-    with open(config.config_path, "w") as f:
-        # Write a human-friendly header
-        f.write("# Telegram Scraper API Server Configuration\n")
-        f.write("# Copy this file to config.yaml and fill in your credentials\n\n")
+    with open(config.settings_path, "w") as f:
+        f.write("# Telegram Scraper — Runtime Settings\n")
+        f.write("# These values can be changed via the /settings API endpoint.\n\n")
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+
+def resolve_settings_file(
+    data_dir: Path, cli_settings_path: Optional[Path] = None
+) -> Path:
+    """
+    Determine which settings.yaml to use and return the canonical path
+    (always inside the data directory).
+
+    Behaviour:
+    - If --settings is given: copy that file into data_dir/settings.yaml
+      (warn if overwriting). Return data_dir/settings.yaml.
+    - If --settings is NOT given: look for data_dir/settings.yaml.
+      If missing, create one with defaults. Return data_dir/settings.yaml.
+    """
+    canonical = data_dir / "settings.yaml"
+
+    if cli_settings_path is not None:
+        # User provided an explicit settings file
+        cli_settings_path = Path(cli_settings_path)
+        if not cli_settings_path.exists():
+            raise ValueError(
+                f"Settings file not found: {cli_settings_path}\n"
+                f"Provide a valid path or omit --settings to use defaults."
+            )
+
+        if canonical.exists():
+            logger.warning(
+                "Overwriting existing %s with %s", canonical, cli_settings_path
+            )
+
+        shutil.copy2(cli_settings_path, canonical)
+        logger.info("Settings imported from %s → %s", cli_settings_path, canonical)
+    else:
+        # No --settings flag
+        if not canonical.exists():
+            # First launch: create settings.yaml with defaults
+            logger.info(
+                "No settings.yaml found in %s — creating with defaults", data_dir
+            )
+            # Write defaults
+            data = dict(SETTINGS_DEFAULTS)
+            with open(canonical, "w") as f:
+                f.write(
+                    "# Telegram Scraper — Runtime Settings\n"
+                    "# These values can be changed via the /settings API endpoint.\n\n"
+                )
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+    logger.info("Using settings file: %s", canonical)
+    return canonical

@@ -160,7 +160,7 @@ async def get_history(
             )
 
         # Ensure channel directory structure and initialize database
-        paths = ensure_channel_directories(_config.output_path, channel_id)
+        paths = ensure_channel_directories(_config.channels_dir, channel_id)
 
         # Create engine and tables
         engine = get_engine(paths.db_file, check_same_thread=False)
@@ -203,7 +203,7 @@ async def get_history(
                         force_refresh=force_refresh,
                         scrape_media=_config.download_media,
                         max_media_size_mb=_config.max_media_size_mb,
-                        output_dir=_config.output_path,
+                        output_dir=_config.channels_dir,
                     ):
                         yield f"data: {json.dumps({'messages': batch})}\n\n"
                 finally:

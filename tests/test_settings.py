@@ -159,57 +159,35 @@ class TestUpdateSettingsValidation:
 
 
 # ---------------------------------------------------------------------------
-# PATCH /settings?persist=true — YAML persistence
+# PATCH /settings — auto-persistence to settings.yaml
 # ---------------------------------------------------------------------------
 
 
-class TestUpdateSettingsPersist:
-    """PATCH /api/v2/settings?persist=true"""
+class TestUpdateSettingsPersistence:
+    """PATCH /api/v2/settings always saves to settings.yaml"""
 
     @pytest.mark.asyncio
-    async def test_persist_false_does_not_write_yaml(
-        self, client, server_config, tmp_path
-    ):
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("# original\n")
-        server_config.config_path = config_file
-
-        await client.patch(
-            "/api/v2/settings", json={"download_media": True}
-        )
-        # File should remain untouched
-        assert config_file.read_text() == "# original\n"
-
-    @pytest.mark.asyncio
-    async def test_persist_true_writes_yaml(
-        self, client, server_config, tmp_path
-    ):
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("# original\n")
-        server_config.config_path = config_file
-
+    async def test_patch_writes_yaml(self, client, server_config):
         resp = await client.patch(
-            "/api/v2/settings?persist=true",
+            "/api/v2/settings",
             json={"download_media": True, "telegram_batch_size": 250},
         )
         assert resp.status_code == 200
 
-        # YAML file should be updated
-        saved = yaml.safe_load(config_file.read_text())
+        # settings.yaml should be updated
+        saved = yaml.safe_load(server_config.settings_path.read_text())
         assert saved["download_media"] is True
         assert saved["telegram_batch_size"] == 250
 
     @pytest.mark.asyncio
-    async def test_persist_without_config_path_still_succeeds(
+    async def test_patch_without_settings_path_still_succeeds(
         self, client, server_config
     ):
-        """If the server wasn't started with a config file, persist=true
-        should still succeed (changes are in-memory only)."""
-        server_config.config_path = None
+        """If settings_path is None, PATCH should still apply in-memory."""
+        server_config.settings_path = None
 
         resp = await client.patch(
-            "/api/v2/settings?persist=true",
-            json={"download_media": True},
+            "/api/v2/settings", json={"download_media": True}
         )
         assert resp.status_code == 200
         assert resp.json()["download_media"] is True
@@ -226,4 +204,3 @@ class TestUpdateSettingsPersist:
         data = resp.json()
         assert data["download_media"] is True
         assert data["telegram_batch_size"] == 999
-

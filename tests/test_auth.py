@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+import yaml
 from httpx import AsyncClient, ASGITransport
 
 from telegram_scraper.server import create_app
@@ -21,28 +22,32 @@ from telegram_scraper.api import auth as api_qr_auth
 
 
 @pytest.fixture
-def tmp_output(tmp_path):
-    out = tmp_path / "output"
-    out.mkdir()
-    return out
+def tmp_data_dir(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "channels").mkdir()
+    (data / "sessions").mkdir()
+
+    settings = {
+        "download_media": False,
+        "max_media_size_mb": None,
+        "telegram_batch_size": 50,
+    }
+    with open(data / "settings.yaml", "w") as f:
+        yaml.dump(settings, f)
+    return data
 
 
 @pytest.fixture
-def tmp_sessions(tmp_path):
-    sessions = tmp_path / "sessions"
-    sessions.mkdir()
-    return sessions
-
-
-@pytest.fixture
-def server_config(tmp_output, tmp_sessions):
+def server_config(tmp_data_dir):
     return ServerConfig(
         api_id="12345",
         api_hash="fakehash",
-        output_path=tmp_output,
-        sessions_path=tmp_sessions,
+        data_dir=tmp_data_dir,
         download_media=False,
         telegram_batch_size=50,
+        max_media_size_mb=None,
+        settings_path=tmp_data_dir / "settings.yaml",
     )
 
 
@@ -152,14 +157,14 @@ class TestStartQRAuth:
 
     async def test_start_rejects_existing_session(self, client, server_config):
         """If a .session file already exists, return 409."""
-        (server_config.sessions_path / "existing.session").touch()
+        (server_config.sessions_dir / "existing.session").touch()
         resp = await client.post("/api/v2/auth/qr", json={"username": "existing"})
         assert resp.status_code == 409
         assert "force" in resp.json()["detail"].lower()
 
     async def test_force_reauth_removes_old_session(self, client, server_config):
         """With force=true, an existing session should be deleted and re-auth started."""
-        (server_config.sessions_path / "reauth.session").touch()
+        (server_config.sessions_dir / "reauth.session").touch()
 
         fake_qr = FakeQRLogin()
         mock_client = _make_mock_client(fake_qr)
@@ -177,7 +182,7 @@ class TestStartQRAuth:
         assert data["qr_url"] == fake_qr.url
 
         # Old session file should have been deleted
-        assert not (server_config.sessions_path / "reauth.session").exists()
+        assert not (server_config.sessions_dir / "reauth.session").exists()
 
         fake_qr.resolve()
         await asyncio.sleep(0.1)

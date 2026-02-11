@@ -11,7 +11,7 @@ FastAPI-based server for scraping and caching Telegram messages with streaming s
 - 🔐 **Header-based authentication** - simple X-Telegram-Username header
 - 🎯 **Media support** - download and serve media files with UUID-based access
 - 📊 **SQLite caching** - persistent message and media storage with atomic commits
-- ⚙️ **Flexible configuration** - YAML, environment variables, or CLI parameters
+- ⚙️ **Runtime settings** - adjust download settings on the fly via API
 
 ## Quick Start
 
@@ -37,16 +37,7 @@ docker run -d -p 8000:8000 \
   telegram-scraper-server
 ```
 
-Sessions and cached data are stored in `/app/data` inside the container — mount it to persist across restarts.
-
-You can also mount a config file instead of using env vars:
-
-```bash
-docker run -d -p 8000:8000 \
-  -v ./config.yaml:/app/config.yaml:ro \
-  -v ./data:/app/data \
-  telegram-scraper-server --config /app/config.yaml
-```
+Sessions, cached data, and settings are stored in `/app/data` inside the container — mount it to persist across restarts.
 
 ### Prerequisites
 
@@ -60,23 +51,17 @@ See [Obtain API id](https://core.telegram.org/api/obtaining_api_id) for more det
 
 ### Setup
 
-**1. Create configuration file:**
+**1. Set up credentials:**
 
 ```bash
-cp config.example.yaml config.yaml
+cp .env.example .env
 ```
 
-Edit `config.yaml`:
+Edit `.env`:
 
-```yaml
-api_id: "YOUR_API_ID"
-api_hash: "YOUR_API_HASH"
-download_media: true
-max_media_size_mb: 50
-output_path: "./data/output"
-sessions_path: "./data/sessions"
-host: "0.0.0.0"
-port: 8000
+```bash
+TELEGRAM_API_ID=YOUR_API_ID
+TELEGRAM_API_HASH=YOUR_API_HASH
 ```
 
 **2. Authenticate a user:**
@@ -84,7 +69,7 @@ port: 8000
 **Option A: CLI (interactive)**
 
 ```bash
-tgsc-auth john_doe --config config.yaml
+tgsc-auth john_doe
 ```
 
 Follow the prompts to scan a QR code or enter your phone number.
@@ -153,7 +138,7 @@ sequenceDiagram
 **3. Start the server:**
 
 ```bash
-tgsc-server --config config.yaml
+tgsc-server
 ```
 
 **4. Test the API:**
@@ -161,114 +146,129 @@ tgsc-server --config config.yaml
 ```bash
 # Find channels
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v1/find-channels?search_by=username&query=telegram"
+  "http://localhost:8000/api/v2/search/dialogs?query=telegram"
 
 # Get message history
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v1/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250"
+  "http://localhost:8000/api/v2/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250"
 
 # Download media
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v1/files/abc-123-uuid" -o photo.jpg"
+  "http://localhost:8000/api/v2/files/abc-123-uuid" -o photo.jpg
 ```
 
 Visit `http://localhost:8000/docs` for interactive API documentation.
 
+## Configuration
+
+The configuration is split into two sources with **no overlap**:
+
+| What | Source | How to change |
+|------|--------|---------------|
+| `api_id`, `api_hash` | `.env` / environment variables | Edit `.env`, restart |
+| `data_dir` | CLI `--data-dir` | `tgsc-server --data-dir ./my-data` |
+| `host`, `port` | CLI `--host` / `--port` | `tgsc-server --port 9000` |
+| `download_media`, `max_media_size_mb`, `telegram_batch_size` | `settings.yaml` in data dir | API or edit file |
+
+### Data Directory Layout
+
+```
+data/                     ← --data-dir (default ./data)
+├── sessions/             ← Telegram session files
+├── channels/             ← Per-channel SQLite databases + media
+│   ├── -1001234567890/
+│   │   ├── -1001234567890.db
+│   │   └── media/
+│   └── ...
+└── settings.yaml         ← Runtime settings (auto-created on first run)
+```
+
+### Runtime Settings
+
+Settings are stored in `{data_dir}/settings.yaml` and can be changed at runtime via the API:
+
+```bash
+# Get current settings
+curl -H "X-Telegram-Username: john_doe" \
+  http://localhost:8000/api/v2/settings
+
+# Update settings
+curl -X PATCH http://localhost:8000/api/v2/settings \
+  -H "X-Telegram-Username: john_doe" \
+  -H "Content-Type: application/json" \
+  -d '{"download_media": false, "max_media_size_mb": 50}'
+```
+
+Changes take effect immediately and are saved to `settings.yaml`.
+
+You can also import a settings file on startup:
+
+```bash
+# Import a settings template (overwrites existing settings.yaml in data dir)
+tgsc-server --settings ./my-settings.yaml
+```
+
+### CLI Reference
+
+```bash
+# Server
+tgsc-server --help
+tgsc-server                                    # defaults: ./data, 0.0.0.0:8000
+tgsc-server --data-dir ./project --port 9000   # custom data dir and port
+tgsc-server --settings ./template.yaml         # import settings template
+
+# Authentication
+tgsc-auth --help
+tgsc-auth john_doe                             # authenticate with default data dir
+tgsc-auth john_doe --data-dir ./project        # custom data dir
+```
+
 ## API Endpoints
 
-### 1. Find Channels
+### 1. Search Dialogs
 
 ```http
-GET /api/v1/find-channels?search_by={criteria}&query={query}
+GET /api/v2/search/dialogs?query={query}
 Header: X-Telegram-Username: your_username
 ```
 
-Search for channels by username, ID, or title.
+Search for channels, groups, and users.
 
 ### 2. Message History
 
 ```http
-GET /api/v1/history/{channel_id}?start_date={date}&end_date={date}&chunk_size={size}
+GET /api/v2/history/{channel_id}?start_date={date}&end_date={date}&chunk_size={size}
 Header: X-Telegram-Username: your_username
 ```
 
 Stream message history with smart caching:
 - `chunk_size=250` - Stream in chunks (Server-Sent Events)
-- `chunk_size=0` - Return all messages at once
 - `force_refresh=true` - Bypass cache and re-download
 
 ### 3. Media Files
 
 ```http
-GET /api/v1/files/{uuid}
+GET /api/v2/files/{uuid}
 Header: X-Telegram-Username: your_username
 ```
 
 Download media file by UUID (provided in message response).
 
-## Configuration
+### 4. Settings
 
-### Priority Order
-
-Parameters are resolved in the following priority (highest to lowest):
-
-1. **CLI arguments** (if explicitly provided)
-2. **Environment variables**
-3. **Config file values** (if `--config` specified)
-4. **Defaults**
-
-### YAML Config File
-
-```yaml
-api_id: "YOUR_API_ID"
-api_hash: "YOUR_API_HASH"
-download_media: true
-max_media_size_mb: 50
-telegram_batch_size: 100
-output_path: "./data/output"
-sessions_path: "./data/sessions"
-host: "0.0.0.0"
-port: 8000
+```http
+GET /api/v2/settings
+PATCH /api/v2/settings
+Header: X-Telegram-Username: your_username
 ```
 
-### Environment Variables
-
-```bash
-export TELEGRAM_API_ID="YOUR_API_ID"
-export TELEGRAM_API_HASH="YOUR_API_HASH"
-export DOWNLOAD_MEDIA=true
-export MAX_MEDIA_SIZE_MB=50
-```
-
-### CLI Parameters
-
-```bash
-# View all available parameters
-tgsc-server --help
-
-# With config file
-tgsc-server --config config.yaml
-
-# Override specific parameters
-tgsc-server --config config.yaml --port 9000 --no-download-media
-
-# Without config file (uses defaults)
-tgsc-server --api-id YOUR_ID --api-hash YOUR_HASH
-```
+Read and update runtime settings (`download_media`, `max_media_size_mb`, `telegram_batch_size`).
 
 ## Documentation
 
 **[Interactive API Docs](http://localhost:8000/docs)** - Swagger UI (when server is running)
 
 ## Development
-
-### Run in development mode
-
-```bash
-uvicorn telegram_scraper.server:app --reload --host 0.0.0.0 --port 8000
-```
-
-> **Note:** When using `uvicorn` directly, the server will use environment variables instead of `config.yaml`. Set `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, etc. as environment variables, or use `tgsc-server --config config.yaml` to load from the config file.
 
 ### Check linting
 
@@ -283,7 +283,7 @@ ruff check src/
 Authenticate first:
 
 ```bash
-tgsc-auth your_username --config config.yaml
+tgsc-auth your_username
 ```
 
 ### "Missing X-Telegram-Username header"
@@ -292,6 +292,15 @@ All API requests require this header:
 
 ```bash
 curl -H "X-Telegram-Username: your_username" ...
+```
+
+### "Missing Telegram API credentials"
+
+Set credentials in `.env`:
+
+```bash
+cp .env.example .env
+# Edit .env with your api_id and api_hash
 ```
 
 ### Port already in use

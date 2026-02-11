@@ -2,13 +2,19 @@
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 import click
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import load_config, ServerConfig
+from .config import (
+    ServerConfig,
+    load_credentials_from_env,
+    load_settings,
+    resolve_settings_file,
+)
 from fastapi import APIRouter
 from .api import dialogs_router, history_router, files_router, auth_router, settings_router, API_PREFIX
 from .api import auth_utils as api_auth
@@ -111,140 +117,85 @@ def create_app(config: ServerConfig) -> FastAPI:
 
 @click.command()
 @click.option(
-    "--config",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Path to YAML configuration file",
-)
-@click.option(
-    "--api-id",
-    type=str,
-    default=None,
-    help="Telegram API ID (overrides config file)",
-)
-@click.option(
-    "--api-hash",
-    type=str,
-    default=None,
-    help="Telegram API hash (overrides config file)",
-)
-@click.option(
-    "--download-media/--no-download-media",
-    default=True,
-    help="Enable or disable media download (default: enabled)",
-)
-@click.option(
-    "--max-media-size-mb",
-    type=float,
-    default=20.0,
-    help="Maximum media file size in MB (0 for no limit, default: 20)",
-)
-@click.option(
-    "--telegram-batch-size",
-    type=int,
-    default=100,
-    help="Batch size for downloading from Telegram (default: 100)",
-)
-@click.option(
-    "--output-path",
+    "--data-dir",
     type=click.Path(path_type=Path),
-    default="./data/output",
-    help="Output directory for cache and media (default: ./data/output)",
-)
-@click.option(
-    "--sessions-path",
-    type=click.Path(path_type=Path),
-    default="./data/sessions",
-    help="Directory for Telegram session files (default: ./data/sessions)",
+    default="./data",
+    help="Data directory for sessions, channels, and settings (default: ./data)",
 )
 @click.option(
     "--host",
     type=str,
-    default=None,
-    help="Server host",
+    default="0.0.0.0",
+    help="Server host (default: 0.0.0.0)",
 )
 @click.option(
     "--port",
     type=int,
-    default=None,
-    help="Server port",
+    default=8000,
+    help="Server port (default: 8000)",
 )
-@click.pass_context
+@click.option(
+    "--settings",
+    "settings_file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to a settings.yaml to import into the data directory (overrides existing)",
+)
 def main(
-    ctx,
-    config,
-    api_id,
-    api_hash,
-    download_media,
-    max_media_size_mb,
-    telegram_batch_size,
-    output_path,
-    sessions_path,
-    host,
-    port,
+    data_dir: Path,
+    host: str,
+    port: int,
+    settings_file: Optional[Path],
 ):
     """Telegram Scraper API Server.
 
-    Start the FastAPI server for the Telegram Scraper with smart cache management.
+    Start the FastAPI server for the Telegram Scraper.
 
     \b
-    Configuration Priority (highest to lowest):
-    1. CLI arguments (if explicitly provided)
-    2. Environment variables
-    3. Config file values (if --config specified)
-    4. Defaults
+    Configuration:
+    - Telegram credentials: set TELEGRAM_API_ID and TELEGRAM_API_HASH
+      as environment variables or in a .env file.
+    - Runtime settings (download_media, max_media_size_mb, telegram_batch_size):
+      stored in {data-dir}/settings.yaml, editable via the /settings API.
+    - Use --settings to import a settings.yaml template on first run
+      or to reset settings.
     """
-    # Build CLI overrides dict
-    # Only include parameters that were explicitly provided or use defaults if no config file
-    cli_overrides = {}
-
-    # Helper to check if parameter was explicitly provided
-    def is_provided(param_name):
-        return (
-            ctx.get_parameter_source(param_name)
-            == click.core.ParameterSource.COMMANDLINE
-        )
-
-    if api_id:
-        cli_overrides["api_id"] = api_id
-    if api_hash:
-        cli_overrides["api_hash"] = api_hash
-
-    # For parameters with defaults, only override if explicitly provided OR no config file
-    if is_provided("download_media") or config is None:
-        cli_overrides["download_media"] = download_media
-
-    if is_provided("max_media_size_mb") or config is None:
-        cli_overrides["max_media_size_mb"] = (
-            max_media_size_mb if max_media_size_mb > 0 else None
-        )
-
-    if is_provided("telegram_batch_size") or config is None:
-        cli_overrides["telegram_batch_size"] = telegram_batch_size
-
-    if is_provided("output_path") or config is None:
-        cli_overrides["output_path"] = output_path
-
-    if is_provided("sessions_path") or config is None:
-        cli_overrides["sessions_path"] = sessions_path
-
-    if host:
-        cli_overrides["host"] = host
-    if port:
-        cli_overrides["port"] = port
-
-    # Load configuration
+    # 1. Load credentials from env
     try:
-        server_config = load_config(config_path=config, cli_overrides=cli_overrides)
+        creds = load_credentials_from_env()
     except ValueError as e:
-        logger.error(f"Configuration error: {e}")
         raise click.ClickException(str(e))
+
+    # 2. Resolve data directory and settings file
+    data_dir = Path(data_dir)
+    try:
+        settings_path = resolve_settings_file(data_dir, settings_file)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    # 3. Load runtime settings from the resolved settings.yaml
+    settings = load_settings(settings_path)
+
+    # 4. Build config
+    server_config = ServerConfig(
+        api_id=creds["api_id"],
+        api_hash=creds["api_hash"],
+        data_dir=data_dir,
+        host=host,
+        port=port,
+        settings_path=settings_path,
+        **settings,
+    )
 
     # Log configuration
     logger.info("=" * 60)
     logger.info("Telegram Scraper API Server")
     logger.info("=" * 60)
     logger.info(f"API ID: {server_config.api_id}")
+    logger.info(f"Data directory: {server_config.data_dir.resolve()}")
+    logger.info(f"  Channels: {server_config.channels_dir.resolve()}")
+    logger.info(f"  Sessions: {server_config.sessions_dir.resolve()}")
+    logger.info(f"Settings file: {server_config.settings_path}")
     logger.info(f"Download media: {server_config.download_media}")
     if server_config.download_media:
         if server_config.max_media_size_mb:
@@ -252,8 +203,6 @@ def main(
         else:
             logger.info("Max media size: unlimited")
     logger.info(f"Telegram batch size: {server_config.telegram_batch_size}")
-    logger.info(f"Output path: {server_config.output_path}")
-    logger.info(f"Sessions path: {server_config.sessions_path}")
     logger.info(f"Server: {server_config.host}:{server_config.port}")
     logger.info("=" * 60)
 
@@ -264,16 +213,3 @@ def main(
     uvicorn.run(
         app_instance, host=server_config.host, port=server_config.port, log_level="info"
     )
-
-
-# TODO: figure out how to run server allow running server in 2 ways:
-# 1. From script: tgsc-server
-# 2. From uvicorn CLI: uvicorn telegram_scraper.server:app --reload
-# Right now, those 2 ways are not compatible, since you have to create app instance in both cases.
-# And creation / configuration process is different in both cases.
-# MB I should create 2 different entry points for server?
-
-# For development with uvicorn CLI (e.g., uvicorn telegram_scraper.server:app --reload)
-# Configure via environment variables. Use tgsc-server for config file support.
-# if __name__ != "__main__":
-# app = create_app(load_config())

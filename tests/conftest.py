@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
+import yaml
 from httpx import AsyncClient, ASGITransport
 
 from telegram_scraper.server import create_app
@@ -19,21 +20,25 @@ from .mock_telegram import MockTelegramClient
 
 
 @pytest.fixture
-def tmp_output(tmp_path):
-    """Temporary output directory for per-channel DBs and media."""
-    out = tmp_path / "output"
-    out.mkdir()
-    return out
-
-
-@pytest.fixture
-def tmp_sessions(tmp_path):
-    """Temporary sessions directory with a fake session file."""
-    sessions = tmp_path / "sessions"
-    sessions.mkdir()
+def tmp_data_dir(tmp_path):
+    """Temporary data directory with channels, sessions, and settings.yaml."""
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "channels").mkdir()
+    (data / "sessions").mkdir()
     # Auth checks that <username>.session exists on disk
-    (sessions / "testuser.session").touch()
-    return sessions
+    (data / "sessions" / "testuser.session").touch()
+
+    # Create a settings.yaml
+    settings = {
+        "download_media": False,
+        "max_media_size_mb": None,
+        "telegram_batch_size": 50,
+    }
+    with open(data / "settings.yaml", "w") as f:
+        yaml.dump(settings, f)
+
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -42,15 +47,16 @@ def tmp_sessions(tmp_path):
 
 
 @pytest.fixture
-def server_config(tmp_output, tmp_sessions):
+def server_config(tmp_data_dir):
     """ServerConfig wired to temp directories — no real Telegram creds needed."""
     return ServerConfig(
         api_id="12345",
         api_hash="fakehash",
-        output_path=tmp_output,
-        sessions_path=tmp_sessions,
+        data_dir=tmp_data_dir,
         download_media=False,
         telegram_batch_size=50,
+        max_media_size_mb=None,
+        settings_path=tmp_data_dir / "settings.yaml",
     )
 
 

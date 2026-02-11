@@ -31,13 +31,11 @@ COPY --from=builder /app/src src
 # Put virtualenv on PATH
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Default data directories (override via volumes or env vars)
-ENV OUTPUT_PATH="/app/data/output" \
-    SESSIONS_PATH="/app/data/sessions"
+# Telegram credentials must be provided via env vars at runtime:
+#   -e TELEGRAM_API_ID=... -e TELEGRAM_API_HASH=...
 
 EXPOSE 8000
 
 ENTRYPOINT ["tgsc-server"]
-# Default: use env vars for config. Override with: --config /app/config.yaml
-CMD []
-
+# Default: data directory at /app/data (mount as volume to persist)
+CMD ["--data-dir", "/app/data"]

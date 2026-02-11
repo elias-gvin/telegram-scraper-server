@@ -17,7 +17,7 @@ from telethon.errors import (
     FloodWaitError,
 )
 
-from .config import load_config
+from .config import load_credentials_from_env
 
 logging.basicConfig(
     level=logging.ERROR,
@@ -304,68 +304,46 @@ async def authenticate_user_cli(
 @click.command()
 @click.argument("username", type=str)
 @click.option(
-    "--config",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Path to YAML configuration file",
-)
-@click.option(
-    "--api-id", type=str, default=None, help="Telegram API ID (overrides config)"
-)
-@click.option(
-    "--api-hash", type=str, default=None, help="Telegram API hash (overrides config)"
-)
-@click.option(
-    "--sessions-path",
+    "--data-dir",
     type=click.Path(path_type=Path),
-    default=None,
-    help="Path to sessions directory (overrides config)",
+    default="./data",
+    help="Data directory containing sessions (default: ./data)",
 )
-def main(username, config, api_id, api_hash, sessions_path):
+def main(username, data_dir):
     """
     Authenticate with Telegram and create session file.
 
     USERNAME is the identifier for the session file (can be any name).
 
     \b
+    Credentials are loaded from environment variables or a .env file:
+      TELEGRAM_API_ID and TELEGRAM_API_HASH
+
+    \b
     Examples:
-      # Authenticate with config file
-      tgsc-auth myusername --config config.yaml
-
-      # Authenticate with explicit credentials
-      tgsc-auth myusername --api-id 12345 --api-hash abc123
-
       # Use environment variables (TELEGRAM_API_ID, TELEGRAM_API_HASH)
       tgsc-auth myusername
-    """
-    # Build CLI overrides
-    cli_overrides = {}
-    if api_id:
-        cli_overrides["api_id"] = api_id
-    if api_hash:
-        cli_overrides["api_hash"] = api_hash
-    if sessions_path:
-        cli_overrides["sessions_path"] = sessions_path
 
-    # Load config
+      # Specify a custom data directory
+      tgsc-auth myusername --data-dir ./my-project/data
+    """
+    # Load credentials from env
     try:
-        loaded_config = load_config(config_path=config, cli_overrides=cli_overrides)
+        creds = load_credentials_from_env()
     except ValueError as e:
         click.secho(f"❌ Configuration error: {e}", fg="red")
-        click.echo("\nYou must provide api_id and api_hash via:")
-        click.echo("  1. Config file (--config config.yaml)")
-        click.echo("  2. Environment variables (TELEGRAM_API_ID, TELEGRAM_API_HASH)")
-        click.echo("  3. CLI parameters (--api-id, --api-hash)")
         sys.exit(1)
+
+    sessions_path = Path(data_dir) / "sessions"
 
     # Run authentication
     try:
         exit_code = asyncio.run(
             authenticate_user_cli(
                 username,
-                loaded_config.api_id,
-                loaded_config.api_hash,
-                loaded_config.sessions_path,
+                creds["api_id"],
+                creds["api_hash"],
+                sessions_path,
             )
         )
         sys.exit(exit_code)
