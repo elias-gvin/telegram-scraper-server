@@ -31,16 +31,27 @@ class User(SQLModel, table=True):
 
 
 class MediaFile(SQLModel, table=True):
-    """Media file storage - standalone, no relationships."""
+    """Media file metadata — always created when a message has media.
+
+    file_path is NULL when the media was not downloaded (e.g. skipped by
+    size limit or download_media=false).  All other fields are always
+    populated from Telegram metadata so we can make repair decisions
+    without hitting the Telegram API.
+    """
 
     __tablename__ = "media_files"
 
     uuid: str = Field(primary_key=True)  # UUID v4
 
-    # File info
-    file_path: str
-    file_size: int  # Bytes
+    # Always populated (from Telegram metadata, no download needed)
+    file_size: int  # Telegram-reported size in bytes
     media_type: str  # Telegram type: MessageMediaPhoto, MessageMediaDocument, etc.
+
+    # Original filename from Telegram (NULL for media types that don't carry one, e.g. photos)
+    original_filename: Optional[str] = None
+
+    # Only populated when the file is actually downloaded
+    file_path: Optional[str] = None  # NULL = not downloaded yet
 
 
 class Message(SQLModel, table=True):

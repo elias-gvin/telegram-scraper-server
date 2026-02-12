@@ -31,6 +31,7 @@ class TestGetSettings:
             "download_media",
             "max_media_size_mb",
             "telegram_batch_size",
+            "repair_media",
         }
 
 

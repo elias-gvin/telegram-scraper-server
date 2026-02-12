@@ -59,9 +59,10 @@ def media_uuid(server_config):
             session,
             channel_id=CHANNEL_ID,
             message_id=1,
-            file_path=str(fake_file),
             file_size=fake_file.stat().st_size,
             media_type="MessageMediaPhoto",
+            original_filename=None,  # Photos don't have original filenames
+            file_path=str(fake_file),
         )
     return uuid
 
@@ -91,9 +92,9 @@ class TestFileServing:
         assert resp.status_code == 200
         data = resp.json()
         assert "file_path" in data
-        assert "filename" in data
+        assert "original_filename" in data
         assert "size" in data
-        assert data["filename"] == "1-photo.jpg"
+        assert data["original_filename"] is None  # Photos don't carry an original filename
         assert data["size"] > 0
 
     @pytest.mark.asyncio

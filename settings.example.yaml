@@ -4,4 +4,5 @@
 download_media: true
 max_media_size_mb: 20
 telegram_batch_size: 100
+repair_media: false
 

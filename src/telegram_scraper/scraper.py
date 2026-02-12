@@ -17,7 +17,7 @@ from sqlmodel import Session
 
 from .database import operations
 from .models import MessageData, DateRange, TimelineSegment
-from .media_downloader import download_media
+from .media_downloader import download_media, get_media_metadata
 
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ def transform_message_to_response(msg_dict: dict) -> dict:
     msg_dict.pop("channel_id", None)
     msg_dict.pop("media_path", None)
 
-    # Keep media fields flat (media_type, media_uuid, media_size, media_filename)
+    # Keep media fields flat (media_type, media_uuid, media_size, media_original_filename)
     # No transformation needed - just return the cleaned dict
 
     return msg_dict
@@ -174,30 +174,33 @@ async def download_from_telegram_batched(
                 else:
                     forwarded_from_channel_id = getattr(peer, "channel_id", None)
 
-            # Get media info
-            media_type = message.media.__class__.__name__ if message.media else None
+            # Always collect media metadata (even if we don't download)
+            media_type = None
             media_path = None
             media_size = None
+            media_original_filename = None
 
-            # Download media if requested
-            if (
-                scrape_media
-                and message.media
-                and not isinstance(message.media, MessageMediaWebPage)
-            ):
-                result = await download_media(
-                    message,
-                    output_dir=output_dir,
-                    channel_id=channel_id,
-                    max_media_size_mb=max_media_size_mb,
-                    force_redownload=force_redownload,
-                )
-                if result.status == "downloaded" and result.path:
-                    media_path = result.path
-                    try:
-                        media_size = Path(media_path).stat().st_size
-                    except Exception:
-                        media_size = None
+            metadata = get_media_metadata(message)
+            if metadata:
+                media_type = metadata.media_type
+                media_size = metadata.file_size
+                media_original_filename = metadata.original_filename
+
+                # Actually download only if settings allow
+                if scrape_media:
+                    result = await download_media(
+                        message,
+                        output_dir=output_dir,
+                        channel_id=channel_id,
+                        max_media_size_mb=max_media_size_mb,
+                        force_redownload=force_redownload,
+                    )
+                    if result.status == "downloaded" and result.path:
+                        media_path = result.path
+                        try:
+                            media_size = Path(media_path).stat().st_size
+                        except Exception:
+                            pass
 
             msg_data = MessageData(
                 message_id=message.id,
@@ -219,6 +222,7 @@ async def download_from_telegram_batched(
                 else None,
                 message=message.message or "",
                 media_type=media_type,
+                media_original_filename=media_original_filename,
                 media_path=media_path,
                 media_size=media_size,
                 media_uuid=None,  # Will be set after insertion
@@ -236,16 +240,18 @@ async def download_from_telegram_batched(
                 try:
                     # First insert messages
                     _batch_insert_messages(session, batch, channel_id)
-                    # Then store media UUIDs (requires messages to exist due to FK)
+                    # Then store media metadata (requires messages to exist due to FK)
+                    # Always create MediaFile when media exists, even if not downloaded
                     for msg in batch:
-                        if msg.media_path:
+                        if msg.media_type:
                             msg.media_uuid = operations.store_media_with_uuid(
                                 session,
                                 channel_id=channel_id,
                                 message_id=msg.message_id,
-                                file_path=msg.media_path,
-                                file_size=msg.media_size,
+                                file_size=msg.media_size or 0,
                                 media_type=msg.media_type,
+                                original_filename=msg.media_original_filename,
+                                file_path=msg.media_path,  # None if not downloaded
                             )
                     session.commit()
                 except Exception as e:
@@ -266,16 +272,17 @@ async def download_from_telegram_batched(
         try:
             # First insert messages
             _batch_insert_messages(session, batch, channel_id)
-            # Then store media UUIDs (requires messages to exist due to FK)
+            # Then store media metadata (requires messages to exist due to FK)
             for msg in batch:
-                if msg.media_path:
+                if msg.media_type:
                     msg.media_uuid = operations.store_media_with_uuid(
                         session,
                         channel_id=channel_id,
                         message_id=msg.message_id,
-                        file_path=msg.media_path,
-                        file_size=msg.media_size,
+                        file_size=msg.media_size or 0,
                         media_type=msg.media_type,
+                        original_filename=msg.media_original_filename,
+                        file_path=msg.media_path,  # None if not downloaded
                     )
             session.commit()
         except Exception as e:
@@ -321,9 +328,14 @@ async def stream_messages_with_cache(
     scrape_media: bool,
     max_media_size_mb: Optional[float],
     output_dir: Path,
+    repair_media: bool = False,
 ) -> AsyncIterator[List[dict]]:
     """
     Stream messages with cache awareness.
+
+    When *repair_media* is ``True`` and a cached message has media metadata
+    but no file on disk, the media is re-downloaded if the current server
+    settings (``scrape_media``, ``max_media_size_mb``) now allow it.
 
     Yields batches of message dictionaries ready for API response.
     """
@@ -354,6 +366,15 @@ async def stream_messages_with_cache(
         covered = find_covered_range(requested, cached_range)
         segments = build_timeline(covered, gaps)
 
+    # Pre-compute max bytes for repair comparison
+    if max_media_size_mb is not None:
+        try:
+            _repair_max_bytes = int(float(max_media_size_mb) * 1024 * 1024)
+        except (TypeError, ValueError):
+            _repair_max_bytes = None
+    else:
+        _repair_max_bytes = None  # no limit
+
     # Stream through timeline
     for segment in segments:
         if segment.source == "cache":
@@ -370,34 +391,84 @@ async def stream_messages_with_cache(
                     msg_dict = row
 
                     # Get media info from MediaFile table
-                    media_uuid = operations.get_media_uuid_by_message_id(
-                        session, channel_id, msg_dict["message_id"]
-                    )
+                    media_uuid = msg_dict.pop("media_uuid", None)
 
                     if media_uuid:
                         media_info = operations.get_media_info_by_uuid(
                             session, media_uuid
                         )
-                        if media_info:
-                            msg_dict["media_type"] = (
-                                media_info.get("media_type") or "unknown"
-                            )
-                            msg_dict["media_uuid"] = media_info.get("uuid")
-                            msg_dict["media_size"] = media_info.get("file_size")
-                            file_path = media_info.get("file_path")
-                            msg_dict["media_filename"] = (
-                                Path(file_path).name if file_path else None
-                            )
-                        else:
-                            msg_dict["media_type"] = None
-                            msg_dict["media_uuid"] = None
-                            msg_dict["media_size"] = None
-                            msg_dict["media_filename"] = None
+                    else:
+                        media_info = None
+
+                    # --- Repair skipped media ---
+                    if (
+                        repair_media
+                        and scrape_media
+                        and media_info
+                        and not media_info.get("file_path")
+                    ):
+                        # Media metadata exists but file was never downloaded.
+                        # Check if current settings now allow it.
+                        cached_size = media_info.get("file_size", 0)
+                        should_download = (
+                            _repair_max_bytes is None
+                            or cached_size <= _repair_max_bytes
+                        )
+
+                        if should_download:
+                            try:
+                                tg_msg = await client.get_messages(
+                                    channel_id, ids=msg_dict["message_id"]
+                                )
+                                if (
+                                    tg_msg
+                                    and tg_msg.media
+                                    and not isinstance(
+                                        tg_msg.media, MessageMediaWebPage
+                                    )
+                                ):
+                                    result = await download_media(
+                                        tg_msg,
+                                        output_dir=output_dir,
+                                        channel_id=channel_id,
+                                        max_media_size_mb=max_media_size_mb,
+                                    )
+                                    if result.status == "downloaded" and result.path:
+                                        operations.update_media_file_path(
+                                            session, media_uuid, result.path
+                                        )
+                                        # Refresh media_info so the response
+                                        # reflects the newly downloaded file
+                                        media_info = operations.get_media_info_by_uuid(
+                                            session, media_uuid
+                                        )
+                                        logger.info(
+                                            "Repaired media for message %d (uuid=%s)",
+                                            msg_dict["message_id"],
+                                            media_uuid,
+                                        )
+                            except Exception as e:
+                                logger.warning(
+                                    "Failed to repair media for message %d: %s",
+                                    msg_dict["message_id"],
+                                    e,
+                                )
+
+                    # Build media fields for response
+                    if media_info:
+                        msg_dict["media_type"] = (
+                            media_info.get("media_type") or "unknown"
+                        )
+                        msg_dict["media_uuid"] = media_info.get("uuid")
+                        msg_dict["media_size"] = media_info.get("file_size")
+                        msg_dict["media_original_filename"] = media_info.get(
+                            "original_filename"
+                        )
                     else:
                         msg_dict["media_type"] = None
                         msg_dict["media_uuid"] = None
                         msg_dict["media_size"] = None
-                        msg_dict["media_filename"] = None
+                        msg_dict["media_original_filename"] = None
 
                     # Transform to nested response format
                     msg_dict = transform_message_to_response(msg_dict)
@@ -424,11 +495,6 @@ async def stream_messages_with_cache(
             ):
                 # Convert MessageData to dict
                 for msg in telegram_batch:
-                    # Extract filename from media_path if present
-                    media_filename = None
-                    if msg.media_path:
-                        media_filename = Path(msg.media_path).name
-
                     msg_dict = {
                         "message_id": msg.message_id,
                         "date": msg.date,
@@ -444,7 +510,7 @@ async def stream_messages_with_cache(
                         "forwarded_from_channel_id": msg.forwarded_from_channel_id,
                         "media_type": msg.media_type,
                         "media_uuid": msg.media_uuid,
-                        "media_filename": media_filename,
+                        "media_original_filename": msg.media_original_filename,
                         "media_size": msg.media_size,
                     }
                     # Transform to nested response format

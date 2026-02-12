@@ -34,6 +34,7 @@ def tmp_data_dir(tmp_path):
         "download_media": False,
         "max_media_size_mb": None,
         "telegram_batch_size": 50,
+        "repair_media": False,
     }
     with open(data / "settings.yaml", "w") as f:
         yaml.dump(settings, f)

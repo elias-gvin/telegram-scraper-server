@@ -5,7 +5,7 @@ Configuration sources (no overlap):
 - data_dir          → CLI --data-dir (default ./data)
 - host, port        → CLI --host / --port
 - settings file     → CLI --settings or {data_dir}/settings.yaml
-- download_media, max_media_size_mb, telegram_batch_size → settings.yaml
+- download_media, max_media_size_mb, telegram_batch_size, repair_media → settings.yaml
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ SETTINGS_DEFAULTS = {
     "download_media": True,
     "max_media_size_mb": 20,
     "telegram_batch_size": 100,
+    "repair_media": False,
 }
 
 
@@ -50,6 +51,7 @@ class ServerConfig:
     download_media: bool = True
     max_media_size_mb: Optional[float] = 20  # None = no limit
     telegram_batch_size: int = 100
+    repair_media: bool = False
 
     # Internal: path to the active settings.yaml file
     settings_path: Optional[Path] = field(default=None, repr=False)
@@ -120,6 +122,8 @@ def load_settings(settings_path: Path) -> dict:
         result["max_media_size_mb"] = None if val is None else float(val)
     if "telegram_batch_size" in data:
         result["telegram_batch_size"] = int(data["telegram_batch_size"])
+    if "repair_media" in data:
+        result["repair_media"] = bool(data["repair_media"])
 
     return result
 
@@ -138,6 +142,7 @@ def save_settings(config: ServerConfig) -> None:
         "download_media": config.download_media,
         "max_media_size_mb": config.max_media_size_mb,
         "telegram_batch_size": config.telegram_batch_size,
+        "repair_media": config.repair_media,
     }
 
     with open(config.settings_path, "w") as f:

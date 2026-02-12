@@ -102,7 +102,14 @@ async def get_file(
     # Find media in databases
     media_info = find_media_by_uuid(file_uuid)
 
-    file_path = FilePath(media_info["file_path"])
+    raw_path = media_info.get("file_path")
+    if not raw_path:
+        raise HTTPException(
+            status_code=404,
+            detail="Media file was not downloaded (skipped by server settings)",
+        )
+
+    file_path = FilePath(raw_path)
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Media file not found on disk")
@@ -112,7 +119,7 @@ async def get_file(
         return JSONResponse(
             content={
                 "file_path": str(file_path.resolve()),
-                "filename": file_path.name,
+                "original_filename": media_info.get("original_filename"),
                 "size": file_path.stat().st_size,
             }
         )

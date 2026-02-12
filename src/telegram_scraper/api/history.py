@@ -42,7 +42,7 @@ class MediaInfo(BaseModel):
 
     type: str
     uuid: str
-    filename: str
+    original_filename: str | None
     size: int
 
 
@@ -204,6 +204,7 @@ async def get_history(
                         scrape_media=_config.download_media,
                         max_media_size_mb=_config.max_media_size_mb,
                         output_dir=_config.channels_dir,
+                        repair_media=_config.repair_media,
                     ):
                         yield f"data: {json.dumps({'messages': batch})}\n\n"
                 finally:

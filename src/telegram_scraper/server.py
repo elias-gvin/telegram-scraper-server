@@ -155,8 +155,8 @@ def main(
     Configuration:
     - Telegram credentials: set TELEGRAM_API_ID and TELEGRAM_API_HASH
       as environment variables or in a .env file.
-    - Runtime settings (download_media, max_media_size_mb, telegram_batch_size):
-      stored in {data-dir}/settings.yaml, editable via the /settings API.
+    - Runtime settings (download_media, max_media_size_mb, telegram_batch_size,
+      repair_media): stored in {data-dir}/settings.yaml, editable via the /settings API.
     - Use --settings to import a settings.yaml template on first run
       or to reset settings.
     """
@@ -203,6 +203,7 @@ def main(
         else:
             logger.info("Max media size: unlimited")
     logger.info(f"Telegram batch size: {server_config.telegram_batch_size}")
+    logger.info(f"Repair media: {server_config.repair_media}")
     logger.info(f"Server: {server_config.host}:{server_config.port}")
     logger.info("=" * 60)
 

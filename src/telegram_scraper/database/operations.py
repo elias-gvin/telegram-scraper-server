@@ -194,62 +194,87 @@ def store_media_with_uuid(
     session: Session,
     channel_id: int,
     message_id: int,
-    file_path: str,
-    file_size: Optional[int] = None,
-    media_type: Optional[str] = None,
+    file_size: int,
+    media_type: str,
+    original_filename: Optional[str] = None,
+    file_path: Optional[str] = None,
 ) -> str:
     """
-    Store media file with UUID and link it to the message.
+    Store media metadata with UUID and link it to the message.
+
+    A MediaFile record is **always** created when a message has media,
+    even if the file was not downloaded.  ``file_path`` is ``None`` when
+    the download was skipped (e.g. size limit, download_media=false).
 
     Args:
         session: SQLModel session
         channel_id: Channel ID (used to find the message)
         message_id: Message ID (used to find the message)
-        file_path: Full file path
-        file_size: File size in bytes (will be calculated if None)
+        file_size: Telegram-reported size in bytes
         media_type: Telegram media type (e.g., 'MessageMediaPhoto')
+        original_filename: Original filename from Telegram (None for photos)
+        file_path: Full file path on disk, or None if not downloaded
 
     Returns:
         UUID string
     """
-    media_uuid = generate_media_uuid()
-
-    # Get file size if not provided
-    if file_size is None:
-        try:
-            file_size = Path(file_path).stat().st_size
-        except Exception:
-            file_size = 0
-
-    # Check if media already exists for this UUID
-    existing = session.get(MediaFile, media_uuid)
-
-    if existing:
-        # Update existing entry
-        existing.file_path = file_path
-        existing.file_size = file_size
-        existing.media_type = media_type or "unknown"
-    else:
-        # Create new entry
-        media_file = MediaFile(
-            uuid=media_uuid,
-            file_path=file_path,
-            file_size=file_size,
-            media_type=media_type or "unknown",
-        )
-        session.add(media_file)
-
-    # Update message's media_uuid (FK reference)
+    # Check if a MediaFile is already linked to this message
     message = session.exec(
         select(Message).where(
             Message.channel_id == channel_id, Message.message_id == message_id
         )
     ).first()
+
+    existing_uuid = message.media_uuid if message else None
+
+    if existing_uuid:
+        # Update the existing MediaFile entry
+        existing = session.get(MediaFile, existing_uuid)
+        if existing:
+            existing.original_filename = original_filename
+            existing.file_size = file_size
+            existing.media_type = media_type or "unknown"
+            if file_path is not None:
+                existing.file_path = file_path
+            session.commit()
+            return existing_uuid
+
+    # Create new MediaFile entry
+    media_uuid = generate_media_uuid()
+
+    media_file = MediaFile(
+        uuid=media_uuid,
+        file_size=file_size,
+        media_type=media_type or "unknown",
+        original_filename=original_filename,
+        file_path=file_path,
+    )
+    session.add(media_file)
+
+    # Update message's media_uuid (FK reference)
     if message:
         message.media_uuid = media_uuid
 
     session.commit()
     return media_uuid
+
+
+def update_media_file_path(
+    session: Session, media_uuid: str, file_path: str
+) -> None:
+    """
+    Set file_path on an existing MediaFile (used by repair_media).
+
+    Also updates file_size to the actual on-disk size.
+    """
+    media_file = session.get(MediaFile, media_uuid)
+    if media_file:
+        media_file.file_path = file_path
+        try:
+            media_file.file_size = Path(file_path).stat().st_size
+        except Exception:
+            pass
+        session.commit()
 
 
 def get_media_uuid_by_message_id(
@@ -278,6 +303,7 @@ def get_media_info_by_uuid(session: Session, media_uuid: str) -> Optional[dict]:
     if media_file:
         return {
             "uuid": media_file.uuid,
+            "original_filename": media_file.original_filename,
             "file_path": media_file.file_path,
             "file_size": media_file.file_size,
             "media_type": media_file.media_type,
@@ -345,7 +371,7 @@ def iter_messages_in_range(
             break
 
         # Convert to dicts for compatibility with existing code
-        # Note: media_type/media_path retrieved separately via MediaFile relationship
+        # Note: full media info retrieved separately via MediaFile relationship
         batch = [
             {
                 "id": msg.id,
@@ -362,6 +388,7 @@ def iter_messages_in_range(
                 "post_author": msg.post_author,
                 "is_forwarded": msg.is_forwarded,
                 "forwarded_from_channel_id": msg.forwarded_from_channel_id,
+                "media_uuid": msg.media_uuid,
             }
             for msg, user in results
         ]

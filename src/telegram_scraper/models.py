@@ -42,11 +42,12 @@ class MessageData:
     post_author: Optional[str] = None
     forwarded_from_channel_id: Optional[int] = None
 
-    # Media (filled after download)
+    # Media (metadata always filled when media exists; path only when downloaded)
     media_type: Optional[str] = None  # Telegram class name
     media_uuid: Optional[str] = None  # Generated UUID
-    media_path: Optional[str] = None  # Local file path
-    media_size: Optional[int] = None  # Bytes
+    media_original_filename: Optional[str] = None  # Original filename from Telegram (None for photos)
+    media_path: Optional[str] = None  # Local file path (None if not downloaded)
+    media_size: Optional[int] = None  # Telegram-reported size in bytes
 
 
 @dataclass

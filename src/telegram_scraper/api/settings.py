@@ -40,6 +40,7 @@ class SettingsResponse(BaseModel):
     download_media: bool
     max_media_size_mb: Optional[float]
     telegram_batch_size: int
+    repair_media: bool
 
 
 class SettingsUpdate(BaseModel):
@@ -61,6 +62,10 @@ class SettingsUpdate(BaseModel):
         default=None,
         description="Internal batch size for downloading from Telegram",
         gt=0,
+    )
+    repair_media: Optional[bool] = Field(
+        default=None,
+        description="If true, re-download media that was previously skipped due to parameter restrictions",
     )
 
 
@@ -87,6 +92,7 @@ async def get_settings(
         download_media=_config.download_media,
         max_media_size_mb=_config.max_media_size_mb,
         telegram_batch_size=_config.telegram_batch_size,
+        repair_media=_config.repair_media,
     )
 
 
@@ -103,6 +109,7 @@ async def get_settings(
     - `download_media` — enable / disable media download
     - `max_media_size_mb` — max media size in MB (`0` or `null` → no limit)
     - `telegram_batch_size` — batch size for Telegram downloads (must be > 0)
+    - `repair_media` — if true, re-download previously skipped media when settings now allow it
     """,
 )
 async def update_settings(
@@ -133,6 +140,9 @@ async def update_settings(
     if body.telegram_batch_size is not None:
         _config.telegram_batch_size = body.telegram_batch_size
 
+    if body.repair_media is not None:
+        _config.repair_media = body.repair_media
+
     # Persist to settings.yaml
     try:
         save_settings(_config)
@@ -146,4 +156,5 @@ async def update_settings(
         download_media=_config.download_media,
         max_media_size_mb=_config.max_media_size_mb,
         telegram_batch_size=_config.telegram_batch_size,
+        repair_media=_config.repair_media,
     )
