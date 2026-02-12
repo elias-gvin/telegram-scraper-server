@@ -17,13 +17,14 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 
 from ..config import ServerConfig
 from . import auth_utils
+from .deps import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -33,15 +34,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Module-level state
 # ---------------------------------------------------------------------------
 
-_config: ServerConfig | None = None
-
 # Pending QR sessions keyed by token
 _qr_sessions: dict[str, _QRSession] = {}  # type: ignore[name-defined]  # forward ref
-
-
-def set_config(config: ServerConfig):
-    global _config
-    _config = config
 
 
 # ---------------------------------------------------------------------------
@@ -253,18 +247,16 @@ class TwoFARequest(BaseModel):
         "Poll `GET /auth/qr/{token}` for status updates."
     ),
 )
-async def start_qr_auth(body: QRStartRequest):
-    if _config is None:
-        raise HTTPException(
-            status_code=500, detail="Server configuration not initialized"
-        )
-
+async def start_qr_auth(
+    body: QRStartRequest,
+    config: ServerConfig = Depends(get_config),
+):
     username = body.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="username must not be empty")
 
     # Check if user already has a valid session
-    session_file = _config.sessions_dir / f"{username}.session"
+    session_file = config.sessions_dir / f"{username}.session"
     if session_file.exists():
         if not body.force:
             raise HTTPException(
@@ -278,8 +270,8 @@ async def start_qr_auth(body: QRStartRequest):
         logger.info("Force re-auth: removed existing session for '%s'", username)
 
     # Create a temporary Telegram client for this auth flow
-    session_path = str(_config.sessions_dir / username)
-    client = TelegramClient(session_path, _config.api_id, _config.api_hash)
+    session_path = str(config.sessions_dir / username)
+    client = TelegramClient(session_path, config.api_id, config.api_hash)
 
     try:
         await client.connect()
@@ -414,7 +406,10 @@ async def submit_2fa_password(token: str, body: TwoFARequest):
     summary="Cancel QR authentication",
     description="Cancel a pending QR login and clean up resources.",
 )
-async def cancel_qr_auth(token: str):
+async def cancel_qr_auth(
+    token: str,
+    config: ServerConfig = Depends(get_config),
+):
     session = _qr_sessions.pop(token, None)
     if session is None:
         raise HTTPException(
@@ -424,7 +419,7 @@ async def cancel_qr_auth(token: str):
     await session.cleanup()
 
     # Remove the partial session file if auth didn't complete
-    session_file = _config.sessions_dir / f"{session.username}.session"
+    session_file = config.sessions_dir / f"{session.username}.session"
     if session_file.exists() and session.status != QRStatus.success:
         session_file.unlink(missing_ok=True)
 
@@ -436,13 +431,13 @@ async def cancel_qr_auth(token: str):
 # ---------------------------------------------------------------------------
 
 
-async def cleanup_qr_sessions():
+async def cleanup_qr_sessions(config: ServerConfig):
     """Cancel all pending QR sessions. Called during server shutdown."""
     for token, session in list(_qr_sessions.items()):
         await session.cleanup()
         # Remove partial session files
         if session.status != QRStatus.success:
-            session_file = _config.sessions_dir / f"{session.username}.session"
+            session_file = config.sessions_dir / f"{session.username}.session"
             if session_file.exists():
                 session_file.unlink(missing_ok=True)
     _qr_sessions.clear()

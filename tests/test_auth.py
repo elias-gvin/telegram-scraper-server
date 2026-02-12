@@ -66,7 +66,7 @@ async def client(app):
         yield c
 
     # Cleanup any leftover QR sessions after each test
-    await api_qr_auth.cleanup_qr_sessions()
+    await api_qr_auth.cleanup_qr_sessions(app.state.config)
 
 
 # ---------------------------------------------------------------------------

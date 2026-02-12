@@ -6,10 +6,8 @@ from telethon import TelegramClient
 import asyncio
 
 from ..config import ServerConfig
+from .deps import get_config
 
-
-# Global config (will be set by server.py)
-_config: ServerConfig = None
 
 # Client pool to reuse Telegram clients per user
 _client_pool: dict[str, TelegramClient] = {}
@@ -17,14 +15,9 @@ _client_locks: dict[str, asyncio.Lock] = {}
 _pool_lock: asyncio.Lock = asyncio.Lock()  # Protects pool and locks dict
 
 
-def set_config(config: ServerConfig):
-    """Set global config for auth module."""
-    global _config
-    _config = config
-
-
 async def get_authenticated_user(
     x_telegram_username: Annotated[str, Header()] = None,
+    config: ServerConfig = Depends(get_config),
 ) -> str:
     """
     Get authenticated user from X-Telegram-Username header.
@@ -41,13 +34,8 @@ async def get_authenticated_user(
             status_code=401, detail="Missing X-Telegram-Username header"
         )
 
-    if _config is None:
-        raise HTTPException(
-            status_code=500, detail="Server configuration not initialized"
-        )
-
     # Check if user has valid Telegram session
-    session_file = _config.sessions_dir / f"{x_telegram_username}.session"
+    session_file = config.sessions_dir / f"{x_telegram_username}.session"
     if not session_file.exists():
         raise HTTPException(
             status_code=401,
@@ -59,6 +47,7 @@ async def get_authenticated_user(
 
 async def get_telegram_client(
     username: str = Depends(get_authenticated_user),
+    config: ServerConfig = Depends(get_config),
 ):
     """
     Get Telegram client for authenticated user.
@@ -69,6 +58,7 @@ async def get_telegram_client(
 
     Args:
         username: Authenticated username (from dependency)
+        config: Server configuration (from dependency)
 
     Yields:
         Connected and authorized TelegramClient
@@ -76,11 +66,6 @@ async def get_telegram_client(
     Raises:
         HTTPException: If session is invalid or not authorized
     """
-    if _config is None:
-        raise HTTPException(
-            status_code=500, detail="Server configuration not initialized"
-        )
-
     # Get or create per-user lock (protected by pool lock)
     async with _pool_lock:
         if username not in _client_locks:
@@ -103,11 +88,11 @@ async def get_telegram_client(
                     del _client_pool[username]
 
         # Create new client
-        session_path = str(_config.sessions_dir / username)
+        session_path = str(config.sessions_dir / username)
         client = TelegramClient(
             session_path,
-            _config.api_id,
-            _config.api_hash,
+            config.api_id,
+            config.api_hash,
             flood_sleep_threshold=120,
         )
 

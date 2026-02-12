@@ -17,11 +17,8 @@ from .config import (
 )
 from fastapi import APIRouter
 from .api import dialogs_router, history_router, files_router, auth_router, settings_router, API_PREFIX
-from .api import auth_utils as api_auth
 from .api import auth as api_qr_auth
-from .api import history as api_history
-from .api import files as api_files
-from .api import settings as api_settings
+from .api import auth_utils as api_auth
 
 from contextlib import asynccontextmanager
 
@@ -40,7 +37,7 @@ async def lifespan(app: FastAPI):
     """
     yield
     logger.info("Shutting down server, cleaning up Telegram clients...")
-    await api_qr_auth.cleanup_qr_sessions()
+    await api_qr_auth.cleanup_qr_sessions(app.state.config)
     await api_auth.cleanup_clients()
     logger.info("Cleanup complete")
 
@@ -73,12 +70,8 @@ def create_app(config: ServerConfig) -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Set config in API modules
-    api_auth.set_config(config)
-    api_qr_auth.set_config(config)
-    api_history.set_config(config)
-    api_files.set_config(config)
-    api_settings.set_config(config)
+    # Store config on app state — all API modules access it via Depends(get_config)
+    app.state.config = config
 
     # Include routers under versioned prefix
     api_router = APIRouter(prefix=API_PREFIX)

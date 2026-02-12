@@ -12,6 +12,7 @@ from telethon import TelegramClient
 from telethon.errors import FloodWaitError
 
 from .auth_utils import get_telegram_client
+from .deps import get_config
 from ..config import ServerConfig
 from ..database import operations
 from ..database import (
@@ -25,16 +26,6 @@ from ..scraper import stream_messages_with_cache
 
 router = APIRouter(tags=["history"])
 logger = logging.getLogger(__name__)
-
-
-# Global config (will be set by server.py)
-_config: ServerConfig = None
-
-
-def set_config(config: ServerConfig):
-    """Set global config for history module."""
-    global _config
-    _config = config
 
 
 class MediaInfo(BaseModel):
@@ -128,17 +119,13 @@ async def get_history(
         bool, Query(description="Force re-download even if cached")
     ] = False,
     client: TelegramClient = Depends(get_telegram_client),
+    config: ServerConfig = Depends(get_config),
 ):
     """
     Get message history for a channel.
 
     Requires X-Telegram-Username header for authentication.
     """
-    if _config is None:
-        raise HTTPException(
-            status_code=500, detail="Server configuration not initialized"
-        )
-
     try:
         # Parse dates - use defaults if not provided
         if start_date:
@@ -160,7 +147,7 @@ async def get_history(
             )
 
         # Ensure channel directory structure and initialize database
-        paths = ensure_channel_directories(_config.channels_dir, channel_id)
+        paths = ensure_channel_directories(config.channels_dir, channel_id)
 
         # Create engine and tables
         engine = get_engine(paths.db_file, check_same_thread=False)
@@ -198,13 +185,13 @@ async def get_history(
                         channel_id,
                         start_dt,
                         end_dt,
-                        telegram_batch_size=_config.telegram_batch_size,
+                        telegram_batch_size=config.telegram_batch_size,
                         client_batch_size=batch_size,
                         force_refresh=force_refresh,
-                        scrape_media=_config.download_media,
-                        max_media_size_mb=_config.max_media_size_mb,
-                        output_dir=_config.channels_dir,
-                        repair_media=_config.repair_media,
+                        scrape_media=config.download_media,
+                        max_media_size_mb=config.max_media_size_mb,
+                        output_dir=config.channels_dir,
+                        repair_media=config.repair_media,
                     ):
                         yield f"data: {json.dumps({'messages': batch})}\n\n"
                 finally:

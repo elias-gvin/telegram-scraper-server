@@ -12,21 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .auth_utils import get_authenticated_user
+from .deps import get_config
 from ..config import ServerConfig, save_settings
 
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 logger = logging.getLogger(__name__)
-
-
-# Global config (will be set by server.py)
-_config: ServerConfig = None
-
-
-def set_config(config: ServerConfig):
-    """Set global config for settings module."""
-    global _config
-    _config = config
 
 
 # ---------------------------------------------------------------------------
@@ -82,17 +73,13 @@ class SettingsUpdate(BaseModel):
 )
 async def get_settings(
     username: str = Depends(get_authenticated_user),
+    config: ServerConfig = Depends(get_config),
 ):
-    if _config is None:
-        raise HTTPException(
-            status_code=500, detail="Server configuration not initialized"
-        )
-
     return SettingsResponse(
-        download_media=_config.download_media,
-        max_media_size_mb=_config.max_media_size_mb,
-        telegram_batch_size=_config.telegram_batch_size,
-        repair_media=_config.repair_media,
+        download_media=config.download_media,
+        max_media_size_mb=config.max_media_size_mb,
+        telegram_batch_size=config.telegram_batch_size,
+        repair_media=config.repair_media,
     )
 
 
@@ -115,12 +102,8 @@ async def get_settings(
 async def update_settings(
     body: SettingsUpdate,
     username: str = Depends(get_authenticated_user),
+    config: ServerConfig = Depends(get_config),
 ):
-    if _config is None:
-        raise HTTPException(
-            status_code=500, detail="Server configuration not initialized"
-        )
-
     # Check that at least one field is provided
     update_data = body.model_dump(exclude_unset=True)
     if not update_data:
@@ -130,31 +113,31 @@ async def update_settings(
 
     # Apply changes to in-memory config
     if body.download_media is not None:
-        _config.download_media = body.download_media
+        config.download_media = body.download_media
 
     if "max_media_size_mb" in update_data:
         # Treat 0 as "no limit"
         val = body.max_media_size_mb
-        _config.max_media_size_mb = None if (val is None or val == 0) else val
+        config.max_media_size_mb = None if (val is None or val == 0) else val
 
     if body.telegram_batch_size is not None:
-        _config.telegram_batch_size = body.telegram_batch_size
+        config.telegram_batch_size = body.telegram_batch_size
 
     if body.repair_media is not None:
-        _config.repair_media = body.repair_media
+        config.repair_media = body.repair_media
 
     # Persist to settings.yaml
     try:
-        save_settings(_config)
-        logger.info("Settings saved to %s", _config.settings_path)
+        save_settings(config)
+        logger.info("Settings saved to %s", config.settings_path)
     except Exception:
         logger.exception("Failed to save settings to file")
 
     logger.info("Settings updated by %s: %s", username, update_data)
 
     return SettingsResponse(
-        download_media=_config.download_media,
-        max_media_size_mb=_config.max_media_size_mb,
-        telegram_batch_size=_config.telegram_batch_size,
-        repair_media=_config.repair_media,
+        download_media=config.download_media,
+        max_media_size_mb=config.max_media_size_mb,
+        telegram_batch_size=config.telegram_batch_size,
+        repair_media=config.repair_media,
     )
