@@ -16,7 +16,14 @@ from .config import (
     resolve_settings_file,
 )
 from fastapi import APIRouter
-from .api import dialogs_router, history_router, files_router, auth_router, settings_router, API_PREFIX
+from .api import (
+    dialogs_router,
+    history_router,
+    files_router,
+    auth_router,
+    settings_router,
+    API_PREFIX,
+)
 from .api import auth as api_qr_auth
 from .api import auth_utils as api_auth
 

@@ -259,9 +259,7 @@ def store_media_with_uuid(
     return media_uuid
 
 
-def update_media_file_path(
-    session: Session, media_uuid: str, file_path: str
-) -> None:
+def update_media_file_path(session: Session, media_uuid: str, file_path: str) -> None:
     """
     Set file_path on an existing MediaFile (used by repair_media).
 

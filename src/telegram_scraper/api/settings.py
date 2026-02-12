@@ -107,9 +107,7 @@ async def update_settings(
     # Check that at least one field is provided
     update_data = body.model_dump(exclude_unset=True)
     if not update_data:
-        raise HTTPException(
-            status_code=422, detail="No fields provided for update"
-        )
+        raise HTTPException(status_code=422, detail="No fields provided for update")
 
     # Apply changes to in-memory config
     if body.download_media is not None:

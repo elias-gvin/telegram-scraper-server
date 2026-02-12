@@ -47,9 +47,7 @@ class TestUpdateSettings:
     async def test_update_download_media(self, client, server_config):
         assert server_config.download_media is False  # conftest default
 
-        resp = await client.patch(
-            "/api/v2/settings", json={"download_media": True}
-        )
+        resp = await client.patch("/api/v2/settings", json={"download_media": True})
         assert resp.status_code == 200
         assert resp.json()["download_media"] is True
         # In-memory config should be updated
@@ -57,18 +55,14 @@ class TestUpdateSettings:
 
     @pytest.mark.asyncio
     async def test_update_max_media_size_mb(self, client, server_config):
-        resp = await client.patch(
-            "/api/v2/settings", json={"max_media_size_mb": 50}
-        )
+        resp = await client.patch("/api/v2/settings", json={"max_media_size_mb": 50})
         assert resp.status_code == 200
         assert resp.json()["max_media_size_mb"] == 50
         assert server_config.max_media_size_mb == 50
 
     @pytest.mark.asyncio
     async def test_update_telegram_batch_size(self, client, server_config):
-        resp = await client.patch(
-            "/api/v2/settings", json={"telegram_batch_size": 200}
-        )
+        resp = await client.patch("/api/v2/settings", json={"telegram_batch_size": 200})
         assert resp.status_code == 200
         assert resp.json()["telegram_batch_size"] == 200
         assert server_config.telegram_batch_size == 200
@@ -94,9 +88,7 @@ class TestUpdateSettings:
         self, client, server_config
     ):
         original_batch = server_config.telegram_batch_size
-        resp = await client.patch(
-            "/api/v2/settings", json={"download_media": True}
-        )
+        resp = await client.patch("/api/v2/settings", json={"download_media": True})
         assert resp.status_code == 200
         assert resp.json()["telegram_batch_size"] == original_batch
 
@@ -107,9 +99,7 @@ class TestUpdateSettings:
 
     @pytest.mark.asyncio
     async def test_max_media_size_zero_means_no_limit(self, client, server_config):
-        resp = await client.patch(
-            "/api/v2/settings", json={"max_media_size_mb": 0}
-        )
+        resp = await client.patch("/api/v2/settings", json={"max_media_size_mb": 0})
         assert resp.status_code == 200
         assert resp.json()["max_media_size_mb"] is None
         assert server_config.max_media_size_mb is None
@@ -121,9 +111,7 @@ class TestUpdateSettings:
         assert server_config.max_media_size_mb == 10
 
         # Then set to null
-        resp = await client.patch(
-            "/api/v2/settings", json={"max_media_size_mb": None}
-        )
+        resp = await client.patch("/api/v2/settings", json={"max_media_size_mb": None})
         assert resp.status_code == 200
         assert resp.json()["max_media_size_mb"] is None
         assert server_config.max_media_size_mb is None
@@ -139,23 +127,17 @@ class TestUpdateSettingsValidation:
 
     @pytest.mark.asyncio
     async def test_negative_max_media_size_rejected(self, client):
-        resp = await client.patch(
-            "/api/v2/settings", json={"max_media_size_mb": -5}
-        )
+        resp = await client.patch("/api/v2/settings", json={"max_media_size_mb": -5})
         assert resp.status_code == 422
 
     @pytest.mark.asyncio
     async def test_zero_batch_size_rejected(self, client):
-        resp = await client.patch(
-            "/api/v2/settings", json={"telegram_batch_size": 0}
-        )
+        resp = await client.patch("/api/v2/settings", json={"telegram_batch_size": 0})
         assert resp.status_code == 422
 
     @pytest.mark.asyncio
     async def test_negative_batch_size_rejected(self, client):
-        resp = await client.patch(
-            "/api/v2/settings", json={"telegram_batch_size": -1}
-        )
+        resp = await client.patch("/api/v2/settings", json={"telegram_batch_size": -1})
         assert resp.status_code == 422
 
 
@@ -187,9 +169,7 @@ class TestUpdateSettingsPersistence:
         """If settings_path is None, PATCH should still apply in-memory."""
         server_config.settings_path = None
 
-        resp = await client.patch(
-            "/api/v2/settings", json={"download_media": True}
-        )
+        resp = await client.patch("/api/v2/settings", json={"download_media": True})
         assert resp.status_code == 200
         assert resp.json()["download_media"] is True
 

@@ -55,9 +55,7 @@ def get_media_metadata(message) -> Optional[MediaMetadata]:
     if not isinstance(message.media, (MessageMediaPhoto, MessageMediaDocument)):
         return None
 
-    original_filename = getattr(
-        getattr(message, "file", None), "name", None
-    )
+    original_filename = getattr(getattr(message, "file", None), "name", None)
 
     return MediaMetadata(
         media_type=media_type,

@@ -18,4 +18,3 @@ def get_config(request: Request) -> ServerConfig:
             status_code=500, detail="Server configuration not initialized"
         )
     return config
-

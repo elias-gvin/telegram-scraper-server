@@ -185,7 +185,7 @@ def _dialog_to_info(dialog, my_id: int) -> DialogInfo:
         is_creator=getattr(entity, "creator", False) or False,
         is_verified=getattr(entity, "verified", False) or False,
         is_archived=dialog.archived,
-        message_count=None, # message_count will be filled later from messages.getHistory
+        message_count=None,  # message_count will be filled later from messages.getHistory
         unread_count=dialog.unread_count or 0,
         participants_count=getattr(entity, "participants_count", None),
         last_message_date=last_message_date,

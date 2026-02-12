@@ -94,12 +94,16 @@ class TestFileServing:
         assert "file_path" in data
         assert "original_filename" in data
         assert "size" in data
-        assert data["original_filename"] is None  # Photos don't carry an original filename
+        assert (
+            data["original_filename"] is None
+        )  # Photos don't carry an original filename
         assert data["size"] > 0
 
     @pytest.mark.asyncio
     async def test_metadata_only_not_found(self, client):
-        resp = await client.get("/api/v2/files/nonexistent-uuid-1234?metadata_only=true")
+        resp = await client.get(
+            "/api/v2/files/nonexistent-uuid-1234?metadata_only=true"
+        )
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
