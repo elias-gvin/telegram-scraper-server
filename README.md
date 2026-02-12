@@ -161,7 +161,10 @@ Visit `http://localhost:8000/docs` for interactive API documentation.
 
 ## Configuration
 
-The configuration is split into two sources with **no overlap**:
+The configuration is retrieved from three distinct sources:
+- environment variables;
+- CLI parameters;
+- yaml file with server settings;
 
 | What | Source | How to change |
 |------|--------|---------------|
@@ -311,7 +314,7 @@ tgsc-server --port 9000
 
 ## License
 
-[Your License Here]
+[MIT License](LICENSE)
 
 ## Acknowledgement
 
