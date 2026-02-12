@@ -487,7 +487,7 @@ async def stream_messages_with_cache(
                 channel_id,
                 segment.start,
                 segment.end,
-                telegram_batch_size,
+                min(telegram_batch_size, client_batch_size),
                 scrape_media,
                 max_media_size_mb,
                 output_dir,
