@@ -71,22 +71,22 @@ def media_uuid(server_config):
 
 
 class TestFileServing:
-    """GET /api/v2/files/{file_uuid}"""
+    """GET /api/v3/files/{file_uuid}"""
 
     @pytest.mark.asyncio
     async def test_download_by_uuid(self, client, media_uuid):
-        resp = await client.get(f"/api/v2/files/{media_uuid}")
+        resp = await client.get(f"/api/v3/files/{media_uuid}")
         assert resp.status_code == 200
         assert b"fake-jpeg-data" in resp.content
 
     @pytest.mark.asyncio
     async def test_content_type_is_image(self, client, media_uuid):
-        resp = await client.get(f"/api/v2/files/{media_uuid}")
+        resp = await client.get(f"/api/v3/files/{media_uuid}")
         assert "image/jpeg" in resp.headers["content-type"]
 
     @pytest.mark.asyncio
     async def test_metadata_only_returns_json(self, client, media_uuid):
-        resp = await client.get(f"/api/v2/files/{media_uuid}?metadata_only=true")
+        resp = await client.get(f"/api/v3/files/{media_uuid}?metadata_only=true")
         assert resp.status_code == 200
         data = resp.json()
         assert "file_path" in data
@@ -100,11 +100,11 @@ class TestFileServing:
     @pytest.mark.asyncio
     async def test_metadata_only_not_found(self, client):
         resp = await client.get(
-            "/api/v2/files/nonexistent-uuid-1234?metadata_only=true"
+            "/api/v3/files/nonexistent-uuid-1234?metadata_only=true"
         )
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_not_found_uuid(self, client):
-        resp = await client.get("/api/v2/files/nonexistent-uuid-1234")
+        resp = await client.get("/api/v3/files/nonexistent-uuid-1234")
         assert resp.status_code == 404

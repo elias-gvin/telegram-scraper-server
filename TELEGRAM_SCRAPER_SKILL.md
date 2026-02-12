@@ -2,7 +2,7 @@
 
 > Curl-based reference for interacting with the Telegram Scraper API.
 > Default base URL: `http://localhost:8000`  
-> API prefix: `/api/v2`
+> API prefix: `/api/v3`
 
 ---
 
@@ -35,7 +35,7 @@ curl http://localhost:8000/health
 ### Start a QR login session
 
 ```bash
-curl -X POST http://localhost:8000/api/v2/auth/qr \
+curl -X POST http://localhost:8000/api/v3/auth/qr \
   -H "Content-Type: application/json" \
   -d '{"username": "john_doe"}'
 # → {"token": "abc123...", "qr_url": "tg://login?token=...", "message": "..."}
@@ -44,7 +44,7 @@ curl -X POST http://localhost:8000/api/v2/auth/qr \
 Force re-auth for an existing session:
 
 ```bash
-curl -X POST http://localhost:8000/api/v2/auth/qr \
+curl -X POST http://localhost:8000/api/v3/auth/qr \
   -H "Content-Type: application/json" \
   -d '{"username": "john_doe", "force": true}'
 ```
@@ -52,7 +52,7 @@ curl -X POST http://localhost:8000/api/v2/auth/qr \
 ### Poll QR status
 
 ```bash
-curl http://localhost:8000/api/v2/auth/qr/{token}
+curl http://localhost:8000/api/v3/auth/qr/{token}
 # → {"status": "pending", "qr_url": "tg://login?token=FRESH...", ...}
 # → {"status": "password_required", ...}
 # → {"status": "success", ...}
@@ -75,7 +75,7 @@ python -c "import qrcode; qr = qrcode.QRCode(); qr.add_data('tg://login?token=..
 ### Submit 2FA password (when status == "password_required")
 
 ```bash
-curl -X POST http://localhost:8000/api/v2/auth/qr/{token}/2fa \
+curl -X POST http://localhost:8000/api/v3/auth/qr/{token}/2fa \
   -H "Content-Type: application/json" \
   -d '{"password": "your_2fa_password"}'
 ```
@@ -83,7 +83,7 @@ curl -X POST http://localhost:8000/api/v2/auth/qr/{token}/2fa \
 ### Cancel a pending QR session
 
 ```bash
-curl -X DELETE http://localhost:8000/api/v2/auth/qr/{token}
+curl -X DELETE http://localhost:8000/api/v3/auth/qr/{token}
 ```
 
 ---
@@ -96,39 +96,39 @@ All query parameters are optional — omit everything to list all dialogs.
 ```bash
 # List all dialogs (default: 50 results, sorted by last_message desc)
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/search/dialogs"
+  "http://localhost:8000/api/v3/search/dialogs"
 
 # Fuzzy search by title
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/search/dialogs?q=crypto&min_score=0.6"
+  "http://localhost:8000/api/v3/search/dialogs?q=crypto&min_score=0.6"
 
 # Exact (substring) search
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/search/dialogs?q=crypto&match=exact"
+  "http://localhost:8000/api/v3/search/dialogs?q=crypto&match=exact"
 
 # Filter by type (repeat for multiple)
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/search/dialogs?type=group&type=supergroup"
+  "http://localhost:8000/api/v3/search/dialogs?type=group&type=supergroup"
 
 # Filter by folder (by name or numeric ID)
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/search/dialogs?folder=Work"
+  "http://localhost:8000/api/v3/search/dialogs?folder=Work"
 
 # Complex filters
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/search/dialogs?min_messages=100&last_message_after=2024-01-01&is_archived=false"
+  "http://localhost:8000/api/v3/search/dialogs?min_messages=100&last_message_after=2024-01-01&is_archived=false"
 
 # Pagination
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/search/dialogs?limit=20&offset=40"
+  "http://localhost:8000/api/v3/search/dialogs?limit=20&offset=40"
 
 # Sort by participants descending
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/search/dialogs?sort=participants&order=desc"
+  "http://localhost:8000/api/v3/search/dialogs?sort=participants&order=desc"
 
 # Saved Messages
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/search/dialogs?type=saved"
+  "http://localhost:8000/api/v3/search/dialogs?type=saved"
 ```
 
 ### Query parameters
@@ -190,7 +190,7 @@ curl -H "X-Telegram-Username: john_doe" \
 
 ```bash
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/folders"
+  "http://localhost:8000/api/v3/folders"
 # → [{"id": 0, "title": "All Chats", "is_default": true}, {"id": 2, "title": "Work", "is_default": false}, ...]
 ```
 
@@ -203,23 +203,23 @@ Fetch message history for a channel. Returns **Server-Sent Events** — each `da
 ```bash
 # Default: 100 messages per chunk, all time
 curl -N -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/history/-1001234567890"
+  "http://localhost:8000/api/v3/history/-1001234567890"
 
 # With date range
 curl -N -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31"
+  "http://localhost:8000/api/v3/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31"
 
 # Smaller chunks for faster first paint
 curl -N -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/history/-1001234567890?chunk_size=50"
+  "http://localhost:8000/api/v3/history/-1001234567890?chunk_size=50"
 
 # Datetime precision
 curl -N -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/history/-1001234567890?start_date=2024-06-15%2012:00:00&end_date=2024-06-15%2018:00:00"
+  "http://localhost:8000/api/v3/history/-1001234567890?start_date=2024-06-15%2012:00:00&end_date=2024-06-15%2018:00:00"
 
 # Force re-download (bypass cache)
 curl -N -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/history/-1001234567890?force_refresh=true"
+  "http://localhost:8000/api/v3/history/-1001234567890?force_refresh=true"
 ```
 
 > **Tip:** Use `curl -N` (no buffering) to see SSE chunks as they arrive.
@@ -272,12 +272,12 @@ Download a media file by UUID (from the `media.uuid` field in message responses)
 ```bash
 # Download to file
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/files/a1b2c3d4-e5f6-7890-abcd-ef1234567890" \
+  "http://localhost:8000/api/v3/files/a1b2c3d4-e5f6-7890-abcd-ef1234567890" \
   -o photo.jpg
 
 # Stream to stdout
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/files/a1b2c3d4-e5f6-7890-abcd-ef1234567890" \
+  "http://localhost:8000/api/v3/files/a1b2c3d4-e5f6-7890-abcd-ef1234567890" \
   --output -
 ```
 
@@ -287,7 +287,7 @@ curl -H "X-Telegram-Username: john_doe" \
 
 ```bash
 USERNAME="john_doe"
-BASE="http://localhost:8000/api/v2"
+BASE="http://localhost:8000/api/v3"
 AUTH="-H X-Telegram-Username:${USERNAME}"
 
 # 1. Authenticate (one-time)

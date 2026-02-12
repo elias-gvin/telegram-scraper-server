@@ -6,7 +6,7 @@ from .files import router as files_router
 from .auth import router as auth_router
 from .settings import router as settings_router
 
-API_VERSION = "v2"
+API_VERSION = "v3"
 API_PREFIX = f"/api/{API_VERSION}"
 
 __all__ = [

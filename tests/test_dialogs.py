@@ -110,11 +110,11 @@ def mock_client():
 
 
 class TestSearchDialogs:
-    """GET /api/v2/search/dialogs"""
+    """GET /api/v3/search/dialogs"""
 
     @pytest.mark.asyncio
     async def test_returns_all_dialogs(self, client):
-        resp = await client.get("/api/v2/search/dialogs")
+        resp = await client.get("/api/v3/search/dialogs")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 6
@@ -123,7 +123,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_response_shape(self, client):
         """Every result must have the expected fields."""
-        resp = await client.get("/api/v2/search/dialogs")
+        resp = await client.get("/api/v3/search/dialogs")
         data = resp.json()
         for r in data["results"]:
             assert "id" in r
@@ -133,7 +133,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_fuzzy_search(self, client):
         resp = await client.get(
-            "/api/v2/search/dialogs", params={"q": "crypto", "min_score": "0.5"}
+            "/api/v3/search/dialogs", params={"q": "crypto", "min_score": "0.5"}
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -143,7 +143,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_exact_search(self, client):
         resp = await client.get(
-            "/api/v2/search/dialogs", params={"q": "python", "match": "exact"}
+            "/api/v3/search/dialogs", params={"q": "python", "match": "exact"}
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -151,7 +151,7 @@ class TestSearchDialogs:
 
     @pytest.mark.asyncio
     async def test_filter_by_type_channel(self, client):
-        resp = await client.get("/api/v2/search/dialogs", params={"type": "channel"})
+        resp = await client.get("/api/v3/search/dialogs", params={"type": "channel"})
         assert resp.status_code == 200
         data = resp.json()
         assert all(r["type"] == "channel" for r in data["results"])
@@ -159,7 +159,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_filter_archived(self, client):
         resp = await client.get(
-            "/api/v2/search/dialogs", params={"is_archived": "true"}
+            "/api/v3/search/dialogs", params={"is_archived": "true"}
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -169,7 +169,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_filter_not_archived(self, client):
         resp = await client.get(
-            "/api/v2/search/dialogs", params={"is_archived": "false"}
+            "/api/v3/search/dialogs", params={"is_archived": "false"}
         )
         data = resp.json()
         assert all(not r["is_archived"] for r in data["results"])
@@ -177,7 +177,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_filter_verified(self, client):
         resp = await client.get(
-            "/api/v2/search/dialogs", params={"is_verified": "true"}
+            "/api/v3/search/dialogs", params={"is_verified": "true"}
         )
         data = resp.json()
         assert data["total"] >= 1
@@ -186,7 +186,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_pagination_limit(self, client):
         resp = await client.get(
-            "/api/v2/search/dialogs", params={"limit": "2", "offset": "0"}
+            "/api/v3/search/dialogs", params={"limit": "2", "offset": "0"}
         )
         data = resp.json()
         assert len(data["results"]) == 2
@@ -195,7 +195,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_pagination_offset(self, client):
         resp = await client.get(
-            "/api/v2/search/dialogs", params={"limit": "2", "offset": "4"}
+            "/api/v3/search/dialogs", params={"limit": "2", "offset": "4"}
         )
         data = resp.json()
         assert len(data["results"]) == 2
@@ -204,7 +204,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_min_messages_filter(self, client):
         resp = await client.get(
-            "/api/v2/search/dialogs", params={"min_messages": "100"}
+            "/api/v3/search/dialogs", params={"min_messages": "100"}
         )
         data = resp.json()
         for r in data["results"]:
@@ -220,7 +220,7 @@ class TestSearchDialogs:
         # Override the count for entity 300 (Family Group, msg.id=50) to 42
         mock_client._message_counts[300] = 42
         resp = await client.get(
-            "/api/v2/search/dialogs", params={"q": "Family", "match": "exact"}
+            "/api/v3/search/dialogs", params={"q": "Family", "match": "exact"}
         )
         data = resp.json()
         assert data["total"] == 1
@@ -232,7 +232,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_sort_by_title_asc(self, client):
         resp = await client.get(
-            "/api/v2/search/dialogs",
+            "/api/v3/search/dialogs",
             params={"sort": "title", "order": "asc"},
         )
         data = resp.json()
@@ -246,11 +246,11 @@ class TestSearchDialogs:
 
 
 class TestFolders:
-    """GET /api/v2/folders"""
+    """GET /api/v3/folders"""
 
     @pytest.mark.asyncio
     async def test_list_folders(self, client):
-        resp = await client.get("/api/v2/folders")
+        resp = await client.get("/api/v3/folders")
         assert resp.status_code == 200
         folders = resp.json()
         assert isinstance(folders, list)
@@ -259,7 +259,7 @@ class TestFolders:
 
     @pytest.mark.asyncio
     async def test_folder_shape(self, client):
-        resp = await client.get("/api/v2/folders")
+        resp = await client.get("/api/v3/folders")
         for f in resp.json():
             assert "id" in f
             assert "title" in f
@@ -267,7 +267,7 @@ class TestFolders:
 
     @pytest.mark.asyncio
     async def test_folder_names(self, client):
-        resp = await client.get("/api/v2/folders")
+        resp = await client.get("/api/v3/folders")
         titles = {f["title"] for f in resp.json()}
         assert "Work" in titles
         assert "Personal" in titles

@@ -69,12 +69,12 @@ def mock_client():
 
 
 class TestHistoryBasic:
-    """GET /api/v2/history/{dialog_id} — basic behaviour."""
+    """GET /api/v3/history/{dialog_id} — basic behaviour."""
 
     @pytest.mark.asyncio
     async def test_returns_sse_stream(self, client):
         resp = await client.get(
-            f"/api/v2/history/{DIALOG_ID}",
+            f"/api/v3/history/{DIALOG_ID}",
             params={"start_date": "2025-01-01", "end_date": "2025-01-02"},
         )
         assert resp.status_code == 200
@@ -83,7 +83,7 @@ class TestHistoryBasic:
     @pytest.mark.asyncio
     async def test_returns_messages(self, client):
         resp = await client.get(
-            f"/api/v2/history/{DIALOG_ID}",
+            f"/api/v3/history/{DIALOG_ID}",
             params={"start_date": "2025-01-01", "end_date": "2025-01-02"},
         )
         messages = parse_sse(resp.text)
@@ -93,7 +93,7 @@ class TestHistoryBasic:
     async def test_message_shape(self, client):
         """Each message dict has the expected keys."""
         resp = await client.get(
-            f"/api/v2/history/{DIALOG_ID}",
+            f"/api/v3/history/{DIALOG_ID}",
             params={"start_date": "2025-01-01", "end_date": "2025-01-02"},
         )
         messages = parse_sse(resp.text)
@@ -107,11 +107,11 @@ class TestHistoryBasic:
     async def test_date_range_filters_messages(self, client):
         """Requesting a narrow window returns fewer messages."""
         resp_wide = await client.get(
-            f"/api/v2/history/{DIALOG_ID}",
+            f"/api/v3/history/{DIALOG_ID}",
             params={"start_date": "2025-01-01", "end_date": "2025-01-02"},
         )
         resp_narrow = await client.get(
-            f"/api/v2/history/{DIALOG_ID}",
+            f"/api/v3/history/{DIALOG_ID}",
             params={
                 "start_date": "2025-01-01",
                 "end_date": "2025-01-01 02:00:00",
@@ -128,7 +128,7 @@ class TestHistoryErrors:
     @pytest.mark.asyncio
     async def test_start_after_end_returns_400(self, client):
         resp = await client.get(
-            f"/api/v2/history/{DIALOG_ID}",
+            f"/api/v3/history/{DIALOG_ID}",
             params={"start_date": "2025-06-01", "end_date": "2025-01-01"},
         )
         assert resp.status_code == 400
@@ -136,7 +136,7 @@ class TestHistoryErrors:
     @pytest.mark.asyncio
     async def test_bad_date_format_returns_400(self, client):
         resp = await client.get(
-            f"/api/v2/history/{DIALOG_ID}",
+            f"/api/v3/history/{DIALOG_ID}",
             params={"start_date": "not-a-date"},
         )
         assert resp.status_code == 400
@@ -149,7 +149,7 @@ class TestHistoryCaching:
     async def test_messages_stored_in_db(self, client, server_config):
         """After a request, messages should be in the dialog DB."""
         resp = await client.get(
-            f"/api/v2/history/{DIALOG_ID}",
+            f"/api/v3/history/{DIALOG_ID}",
             params={"start_date": "2025-01-01", "end_date": "2025-01-02"},
         )
         api_msgs = parse_sse(resp.text)
@@ -169,7 +169,7 @@ class TestHistoryCaching:
         params = {"start_date": "2025-01-01", "end_date": "2025-01-01 04:30:00"}
 
         # 1st request — scraper downloads from mock → writes to DB
-        resp1 = await client.get(f"/api/v2/history/{DIALOG_ID}", params=params)
+        resp1 = await client.get(f"/api/v3/history/{DIALOG_ID}", params=params)
         msgs1 = parse_sse(resp1.text)
         assert len(msgs1) > 0
 
@@ -177,7 +177,7 @@ class TestHistoryCaching:
         mock_client.set_messages(DIALOG_ID, [])
 
         # 2nd request — cache covers most of the range; telegram gap yields nothing
-        resp2 = await client.get(f"/api/v2/history/{DIALOG_ID}", params=params)
+        resp2 = await client.get(f"/api/v3/history/{DIALOG_ID}", params=params)
         msgs2 = parse_sse(resp2.text)
 
         # Cached messages should still be returned
@@ -189,7 +189,7 @@ class TestHistoryCaching:
         params = {"start_date": "2025-01-01", "end_date": "2025-01-02"}
 
         # Populate cache
-        resp = await client.get(f"/api/v2/history/{DIALOG_ID}", params=params)
+        resp = await client.get(f"/api/v3/history/{DIALOG_ID}", params=params)
         assert len(parse_sse(resp.text)) > 0
 
         # Empty the mock
@@ -197,7 +197,7 @@ class TestHistoryCaching:
 
         # force_refresh should bypass cache → nothing from empty mock
         resp = await client.get(
-            f"/api/v2/history/{DIALOG_ID}",
+            f"/api/v3/history/{DIALOG_ID}",
             params={**params, "force_refresh": "true"},
         )
         msgs = parse_sse(resp.text)

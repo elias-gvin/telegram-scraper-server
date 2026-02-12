@@ -1,4 +1,4 @@
-"""Tests for the settings endpoints (GET / PATCH /api/v2/settings)."""
+"""Tests for the settings endpoints (GET / PATCH /api/v3/settings)."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ import yaml
 
 
 class TestGetSettings:
-    """GET /api/v2/settings"""
+    """GET /api/v3/settings"""
 
     @pytest.mark.asyncio
     async def test_returns_current_values(self, client, server_config):
-        resp = await client.get("/api/v2/settings")
+        resp = await client.get("/api/v3/settings")
         assert resp.status_code == 200
         data = resp.json()
         assert data["download_media"] == server_config.download_media
@@ -25,7 +25,7 @@ class TestGetSettings:
 
     @pytest.mark.asyncio
     async def test_response_has_no_extra_fields(self, client):
-        resp = await client.get("/api/v2/settings")
+        resp = await client.get("/api/v3/settings")
         assert resp.status_code == 200
         assert set(resp.json().keys()) == {
             "download_media",
@@ -41,13 +41,13 @@ class TestGetSettings:
 
 
 class TestUpdateSettings:
-    """PATCH /api/v2/settings"""
+    """PATCH /api/v3/settings"""
 
     @pytest.mark.asyncio
     async def test_update_download_media(self, client, server_config):
         assert server_config.download_media is False  # conftest default
 
-        resp = await client.patch("/api/v2/settings", json={"download_media": True})
+        resp = await client.patch("/api/v3/settings", json={"download_media": True})
         assert resp.status_code == 200
         assert resp.json()["download_media"] is True
         # In-memory config should be updated
@@ -55,14 +55,14 @@ class TestUpdateSettings:
 
     @pytest.mark.asyncio
     async def test_update_max_media_size_mb(self, client, server_config):
-        resp = await client.patch("/api/v2/settings", json={"max_media_size_mb": 50})
+        resp = await client.patch("/api/v3/settings", json={"max_media_size_mb": 50})
         assert resp.status_code == 200
         assert resp.json()["max_media_size_mb"] == 50
         assert server_config.max_media_size_mb == 50
 
     @pytest.mark.asyncio
     async def test_update_telegram_batch_size(self, client, server_config):
-        resp = await client.patch("/api/v2/settings", json={"telegram_batch_size": 200})
+        resp = await client.patch("/api/v3/settings", json={"telegram_batch_size": 200})
         assert resp.status_code == 200
         assert resp.json()["telegram_batch_size"] == 200
         assert server_config.telegram_batch_size == 200
@@ -70,7 +70,7 @@ class TestUpdateSettings:
     @pytest.mark.asyncio
     async def test_update_multiple_fields(self, client, server_config):
         resp = await client.patch(
-            "/api/v2/settings",
+            "/api/v3/settings",
             json={
                 "download_media": True,
                 "max_media_size_mb": 100,
@@ -88,18 +88,18 @@ class TestUpdateSettings:
         self, client, server_config
     ):
         original_batch = server_config.telegram_batch_size
-        resp = await client.patch("/api/v2/settings", json={"download_media": True})
+        resp = await client.patch("/api/v3/settings", json={"download_media": True})
         assert resp.status_code == 200
         assert resp.json()["telegram_batch_size"] == original_batch
 
     @pytest.mark.asyncio
     async def test_empty_body_returns_422(self, client):
-        resp = await client.patch("/api/v2/settings", json={})
+        resp = await client.patch("/api/v3/settings", json={})
         assert resp.status_code == 422
 
     @pytest.mark.asyncio
     async def test_max_media_size_zero_means_no_limit(self, client, server_config):
-        resp = await client.patch("/api/v2/settings", json={"max_media_size_mb": 0})
+        resp = await client.patch("/api/v3/settings", json={"max_media_size_mb": 0})
         assert resp.status_code == 200
         assert resp.json()["max_media_size_mb"] is None
         assert server_config.max_media_size_mb is None
@@ -107,11 +107,11 @@ class TestUpdateSettings:
     @pytest.mark.asyncio
     async def test_max_media_size_null_means_no_limit(self, client, server_config):
         # First set to a value
-        await client.patch("/api/v2/settings", json={"max_media_size_mb": 10})
+        await client.patch("/api/v3/settings", json={"max_media_size_mb": 10})
         assert server_config.max_media_size_mb == 10
 
         # Then set to null
-        resp = await client.patch("/api/v2/settings", json={"max_media_size_mb": None})
+        resp = await client.patch("/api/v3/settings", json={"max_media_size_mb": None})
         assert resp.status_code == 200
         assert resp.json()["max_media_size_mb"] is None
         assert server_config.max_media_size_mb is None
@@ -123,21 +123,21 @@ class TestUpdateSettings:
 
 
 class TestUpdateSettingsValidation:
-    """PATCH /api/v2/settings — input validation"""
+    """PATCH /api/v3/settings — input validation"""
 
     @pytest.mark.asyncio
     async def test_negative_max_media_size_rejected(self, client):
-        resp = await client.patch("/api/v2/settings", json={"max_media_size_mb": -5})
+        resp = await client.patch("/api/v3/settings", json={"max_media_size_mb": -5})
         assert resp.status_code == 422
 
     @pytest.mark.asyncio
     async def test_zero_batch_size_rejected(self, client):
-        resp = await client.patch("/api/v2/settings", json={"telegram_batch_size": 0})
+        resp = await client.patch("/api/v3/settings", json={"telegram_batch_size": 0})
         assert resp.status_code == 422
 
     @pytest.mark.asyncio
     async def test_negative_batch_size_rejected(self, client):
-        resp = await client.patch("/api/v2/settings", json={"telegram_batch_size": -1})
+        resp = await client.patch("/api/v3/settings", json={"telegram_batch_size": -1})
         assert resp.status_code == 422
 
 
@@ -147,12 +147,12 @@ class TestUpdateSettingsValidation:
 
 
 class TestUpdateSettingsPersistence:
-    """PATCH /api/v2/settings always saves to settings.yaml"""
+    """PATCH /api/v3/settings always saves to settings.yaml"""
 
     @pytest.mark.asyncio
     async def test_patch_writes_yaml(self, client, server_config):
         resp = await client.patch(
-            "/api/v2/settings",
+            "/api/v3/settings",
             json={"download_media": True, "telegram_batch_size": 250},
         )
         assert resp.status_code == 200
@@ -169,7 +169,7 @@ class TestUpdateSettingsPersistence:
         """If settings_path is None, PATCH should still apply in-memory."""
         server_config.settings_path = None
 
-        resp = await client.patch("/api/v2/settings", json={"download_media": True})
+        resp = await client.patch("/api/v3/settings", json={"download_media": True})
         assert resp.status_code == 200
         assert resp.json()["download_media"] is True
 
@@ -177,10 +177,10 @@ class TestUpdateSettingsPersistence:
     async def test_get_reflects_patched_values(self, client):
         """GET after PATCH should return updated values."""
         await client.patch(
-            "/api/v2/settings",
+            "/api/v3/settings",
             json={"download_media": True, "telegram_batch_size": 999},
         )
-        resp = await client.get("/api/v2/settings")
+        resp = await client.get("/api/v3/settings")
         assert resp.status_code == 200
         data = resp.json()
         assert data["download_media"] is True

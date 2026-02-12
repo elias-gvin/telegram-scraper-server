@@ -80,17 +80,17 @@ Start the server first (step 3), then authenticate via API:
 
 ```bash
 # Start a QR login session
-curl -X POST http://localhost:8000/api/v2/auth/qr \
+curl -X POST http://localhost:8000/api/v3/auth/qr \
   -H "Content-Type: application/json" \
   -d '{"username": "john_doe"}'
 # → {"token": "abc123...", "qr_url": "tg://login?token=...", ...}
 
 # Poll for status (qr_url auto-refreshes every ~25s — re-render it each time)
-curl http://localhost:8000/api/v2/auth/qr/{token}
+curl http://localhost:8000/api/v3/auth/qr/{token}
 # → {"status": "pending", "qr_url": "tg://login?token=FRESH...", ...}
 
 # If 2FA is enabled (status == "password_required"):
-curl -X POST http://localhost:8000/api/v2/auth/qr/{token}/2fa \
+curl -X POST http://localhost:8000/api/v3/auth/qr/{token}/2fa \
   -H "Content-Type: application/json" \
   -d '{"password": "your_2fa_password"}'
 ```
@@ -146,15 +146,15 @@ tgsc-server
 ```bash
 # Find channels
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/search/dialogs?query=telegram"
+  "http://localhost:8000/api/v3/search/dialogs?query=telegram"
 
 # Get message history
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250"
+  "http://localhost:8000/api/v3/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250"
 
 # Download media
 curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v2/files/abc-123-uuid" -o photo.jpg
+  "http://localhost:8000/api/v3/files/abc-123-uuid" -o photo.jpg
 ```
 
 Visit `http://localhost:8000/docs` for interactive API documentation.
@@ -193,10 +193,10 @@ Settings are stored in `{data_dir}/settings.yaml` and can be changed at runtime 
 ```bash
 # Get current settings
 curl -H "X-Telegram-Username: john_doe" \
-  http://localhost:8000/api/v2/settings
+  http://localhost:8000/api/v3/settings
 
 # Update settings
-curl -X PATCH http://localhost:8000/api/v2/settings \
+curl -X PATCH http://localhost:8000/api/v3/settings \
   -H "X-Telegram-Username: john_doe" \
   -H "Content-Type: application/json" \
   -d '{"download_media": false, "max_media_size_mb": 50}'
@@ -231,7 +231,7 @@ tgsc-auth john_doe --data-dir ./project        # custom data dir
 ### 1. Search Dialogs
 
 ```http
-GET /api/v2/search/dialogs?query={query}
+GET /api/v3/search/dialogs?query={query}
 Header: X-Telegram-Username: your_username
 ```
 
@@ -240,7 +240,7 @@ Search for channels, groups, and users.
 ### 2. Message History
 
 ```http
-GET /api/v2/history/{channel_id}?start_date={date}&end_date={date}&chunk_size={size}
+GET /api/v3/history/{channel_id}?start_date={date}&end_date={date}&chunk_size={size}
 Header: X-Telegram-Username: your_username
 ```
 
@@ -251,7 +251,7 @@ Stream message history with smart caching:
 ### 3. Media Files
 
 ```http
-GET /api/v2/files/{uuid}
+GET /api/v3/files/{uuid}
 Header: X-Telegram-Username: your_username
 ```
 
@@ -260,8 +260,8 @@ Download media file by UUID (provided in message response).
 ### 4. Settings
 
 ```http
-GET /api/v2/settings
-PATCH /api/v2/settings
+GET /api/v3/settings
+PATCH /api/v3/settings
 Header: X-Telegram-Username: your_username
 ```
 
