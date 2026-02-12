@@ -67,7 +67,7 @@ def get_media_metadata(message) -> Optional[MediaMetadata]:
 async def download_media(
     message,  # Telethon Message object
     output_dir: Path,
-    channel_id: int,
+    dialog_id: int,
     max_media_size_mb: Optional[float] = None,
     force_redownload: bool = False,
 ) -> MediaDownloadResult:
@@ -77,7 +77,7 @@ async def download_media(
     Args:
         message: Telethon Message object
         output_dir: Base output directory
-        channel_id: Channel ID for organizing media
+        dialog_id: Dialog ID for organizing media
         max_media_size_mb: Optional size limit in MB (None = no limit)
 
     Returns:
@@ -93,8 +93,8 @@ async def download_media(
         # Determine media folder path
         db_dir = (
             output_dir
-            if output_dir.name == str(channel_id)
-            else (output_dir / str(channel_id))
+            if output_dir.name == str(dialog_id)
+            else (output_dir / str(dialog_id))
         )
 
         media_folder = db_dir / "media"

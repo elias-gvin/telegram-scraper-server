@@ -21,10 +21,10 @@ from .mock_telegram import MockTelegramClient
 
 @pytest.fixture
 def tmp_data_dir(tmp_path):
-    """Temporary data directory with channels, sessions, and settings.yaml."""
+    """Temporary data directory with dialogs, sessions, and settings.yaml."""
     data = tmp_path / "data"
     data.mkdir()
-    (data / "channels").mkdir()
+    (data / "dialogs").mkdir()
     (data / "sessions").mkdir()
     # Auth checks that <username>.session exists on disk
     (data / "sessions" / "testuser.session").touch()

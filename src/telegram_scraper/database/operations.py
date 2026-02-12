@@ -8,52 +8,47 @@ from datetime import datetime, timezone
 from typing import Optional, Sequence, List, Tuple
 from sqlmodel import Session, select
 
-from .models import Channel, User, Message, MediaFile
+from .models import Dialog, User, Message, MediaFile
 
 
-def upsert_channel(
+def upsert_dialog(
     session: Session,
     *,
-    channel_id: str | int,
-    channel_name: str,
-    channel_username: str | None = None,
-    creator_id: int | None = None,
-) -> Channel:
+    dialog_id: str | int,
+    name: str,
+    username: str | None = None,
+) -> Dialog:
     """
-    Insert or update channel information.
+    Insert or update dialog information.
 
     Args:
         session: SQLModel session
-        channel_id: Channel ID
-        channel_name: Channel name/title
-        channel_username: Channel username (e.g., @channelname)
-        creator_id: Telegram user ID of channel creator/owner (optional)
+        dialog_id: Dialog ID
+        name: Dialog name/title
+        username: Dialog username (e.g., @username)
 
     Returns:
-        Channel object
+        Dialog object
     """
-    channel = session.get(Channel, int(channel_id))
+    dialog = session.get(Dialog, int(dialog_id))
 
-    if channel:
+    if dialog:
         # Update existing
-        channel.channel_name = channel_name
-        if channel_username is not None:
-            channel.channel_username = channel_username
-        if creator_id is not None:
-            channel.creator_id = creator_id
+        dialog.name = name
+        if username is not None:
+            dialog.username = username
     else:
         # Create new
-        channel = Channel(
-            channel_id=int(channel_id),
-            channel_name=channel_name,
-            channel_username=channel_username,
-            creator_id=creator_id,
+        dialog = Dialog(
+            dialog_id=int(dialog_id),
+            name=name,
+            username=username,
         )
-        session.add(channel)
+        session.add(dialog)
 
     session.commit()
-    session.refresh(channel)
-    return channel
+    session.refresh(dialog)
+    return dialog
 
 
 def upsert_user(
@@ -106,7 +101,7 @@ def batch_upsert_messages(
     session: Session,
     messages: Sequence[object],
     *,
-    channel_id: str | int,
+    dialog_id: str | int,
     replace_existing: bool = True,
     auto_commit: bool = True,
 ) -> None:
@@ -117,7 +112,7 @@ def batch_upsert_messages(
     Args:
         session: SQLModel session
         messages: Sequence of message objects with MessageData attributes
-        channel_id: Channel ID these messages belong to
+        dialog_id: Dialog ID these messages belong to
         replace_existing: If True, update existing messages; if False, skip duplicates
         auto_commit: If True, commit after batch insert; if False, caller manages transaction
     """
@@ -140,7 +135,7 @@ def batch_upsert_messages(
         # Check if message exists
         existing = session.exec(
             select(Message).where(
-                Message.channel_id == int(channel_id),
+                Message.dialog_id == int(dialog_id),
                 Message.message_id == int(getattr(msg, "message_id")),
             )
         ).first()
@@ -148,7 +143,7 @@ def batch_upsert_messages(
         if existing:
             if replace_existing:
                 # Update existing message
-                existing.channel_id = int(channel_id)
+                existing.dialog_id = int(dialog_id)
                 existing.date = str(getattr(msg, "date"))
                 existing.edit_date = getattr(msg, "edit_date", None)
                 existing.sender_id = sender_id
@@ -163,7 +158,7 @@ def batch_upsert_messages(
         else:
             # Insert new message
             new_message = Message(
-                channel_id=int(channel_id),
+                dialog_id=int(dialog_id),
                 message_id=int(getattr(msg, "message_id")),
                 date=str(getattr(msg, "date")),
                 edit_date=getattr(msg, "edit_date", None),
@@ -192,7 +187,7 @@ def generate_media_uuid() -> str:
 
 def store_media_with_uuid(
     session: Session,
-    channel_id: int,
+    dialog_id: int,
     message_id: int,
     file_size: int,
     media_type: str,
@@ -208,7 +203,7 @@ def store_media_with_uuid(
 
     Args:
         session: SQLModel session
-        channel_id: Channel ID (used to find the message)
+        dialog_id: Dialog ID (used to find the message)
         message_id: Message ID (used to find the message)
         file_size: Telegram-reported size in bytes
         media_type: Telegram media type (e.g., 'MessageMediaPhoto')
@@ -221,7 +216,7 @@ def store_media_with_uuid(
     # Check if a MediaFile is already linked to this message
     message = session.exec(
         select(Message).where(
-            Message.channel_id == channel_id, Message.message_id == message_id
+            Message.dialog_id == dialog_id, Message.message_id == message_id
         )
     ).first()
 
@@ -276,12 +271,12 @@ def update_media_file_path(session: Session, media_uuid: str, file_path: str) ->
 
 
 def get_media_uuid_by_message_id(
-    session: Session, channel_id: int, message_id: int
+    session: Session, dialog_id: int, message_id: int
 ) -> Optional[str]:
     """Get media UUID for a message by querying the message directly."""
     message = session.exec(
         select(Message).where(
-            Message.channel_id == channel_id, Message.message_id == message_id
+            Message.dialog_id == dialog_id, Message.message_id == message_id
         )
     ).first()
 
@@ -310,10 +305,10 @@ def get_media_info_by_uuid(session: Session, media_uuid: str) -> Optional[dict]:
 
 
 def get_cached_date_range(
-    session: Session, channel_id: str | int
+    session: Session, dialog_id: str | int
 ) -> Optional[Tuple[datetime, datetime]]:
     """
-    Get the date range of cached messages for a channel.
+    Get the date range of cached messages for a dialog.
 
     Returns:
         Tuple of (min_date, max_date) or None if no messages
@@ -323,7 +318,7 @@ def get_cached_date_range(
 
     result = session.exec(
         sa_select(func.min(Message.date), func.max(Message.date)).where(
-            Message.channel_id == int(channel_id)
+            Message.dialog_id == int(dialog_id)
         )
     ).first()
 
@@ -336,7 +331,7 @@ def get_cached_date_range(
 
 def iter_messages_in_range(
     session: Session,
-    channel_id: str | int,
+    dialog_id: str | int,
     start_date: datetime,
     end_date: datetime,
     batch_size: int = 100,
@@ -354,7 +349,7 @@ def iter_messages_in_range(
             select(Message, User)
             .join(User, Message.sender_id == User.user_id, isouter=True)
             .where(
-                Message.channel_id == int(channel_id),
+                Message.dialog_id == int(dialog_id),
                 Message.date >= start_date.strftime("%Y-%m-%d %H:%M:%S"),
                 Message.date <= end_date.strftime("%Y-%m-%d %H:%M:%S"),
             )
@@ -373,7 +368,7 @@ def iter_messages_in_range(
         batch = [
             {
                 "id": msg.id,
-                "channel_id": msg.channel_id,
+                "dialog_id": msg.dialog_id,
                 "message_id": msg.message_id,
                 "date": msg.date,
                 "edit_date": msg.edit_date,

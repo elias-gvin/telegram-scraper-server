@@ -168,16 +168,16 @@ class MockTelegramClient:
         self.messages = messages or []
         self._me = me or FakeUser(id=999, first_name="Test", username="testuser")
         self._folders = folders or []
-        self._messages_by_channel: dict[int, List[FakeMessage]] = {}
+        self._messages_by_dialog: dict[int, List[FakeMessage]] = {}
         # Explicit overrides for message counts returned by get_messages().
         # If not set for an entity, falls back to the dialog's top message ID.
         self._message_counts: dict[int, int] = {}
 
     # -- helpers for test setup --
 
-    def set_messages(self, channel_id: int, messages: List[FakeMessage]):
-        """Assign messages for a specific channel."""
-        self._messages_by_channel[channel_id] = messages
+    def set_messages(self, dialog_id: int, messages: List[FakeMessage]):
+        """Assign messages for a specific dialog."""
+        self._messages_by_dialog[dialog_id] = messages
 
     # -- TelegramClient API surface used by production code --
 
@@ -185,7 +185,7 @@ class MockTelegramClient:
         return self._me
 
     async def get_entity(self, entity_id):
-        return FakeEntity(id=entity_id, title=f"Channel {entity_id}")
+        return FakeEntity(id=entity_id, title=f"Dialog {entity_id}")
 
     async def iter_dialogs(self, **kwargs):
         for d in self.dialogs:
@@ -207,16 +207,16 @@ class MockTelegramClient:
                     break
         if limit == 0:
             return FakeTotalList(total=count)
-        # Non-zero limit: return actual messages from the channel store
-        msgs = self._messages_by_channel.get(entity_id, self.messages)[:limit]
+        # Non-zero limit: return actual messages from the dialog store
+        msgs = self._messages_by_dialog.get(entity_id, self.messages)[:limit]
         result = FakeTotalList(
-            msgs, total=len(self._messages_by_channel.get(entity_id, self.messages))
+            msgs, total=len(self._messages_by_dialog.get(entity_id, self.messages))
         )
         return result
 
     async def iter_messages(self, entity, offset_date=None, reverse=False, **kwargs):
         entity_id = entity.id if hasattr(entity, "id") else entity
-        messages = self._messages_by_channel.get(entity_id, self.messages)
+        messages = self._messages_by_dialog.get(entity_id, self.messages)
 
         sorted_msgs = sorted(messages, key=lambda m: m.date, reverse=(not reverse))
         for msg in sorted_msgs:

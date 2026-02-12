@@ -9,7 +9,7 @@ from .auth_utils import get_authenticated_user
 from .deps import get_config
 from ..config import ServerConfig
 from ..database import operations
-from ..database import get_session, channel_db_paths
+from ..database import get_session, dialog_db_paths
 
 
 router = APIRouter(tags=["files"])
@@ -17,23 +17,23 @@ router = APIRouter(tags=["files"])
 
 def find_media_by_uuid(media_uuid: str, config: ServerConfig) -> dict:
     """
-    Search for media file by UUID across all channel databases.
+    Search for media file by UUID across all dialog databases.
 
     Returns:
         Dict with media info or raises HTTPException if not found
     """
-    channels_dir = config.channels_dir
+    dialogs_dir = config.dialogs_dir
 
-    if not channels_dir.exists():
+    if not dialogs_dir.exists():
         raise HTTPException(status_code=404, detail="Media not found")
 
-    # Iterate through channel directories
-    for channel_dir in channels_dir.iterdir():
-        if not channel_dir.is_dir():
+    # Iterate through dialog directories
+    for dialog_dir in dialogs_dir.iterdir():
+        if not dialog_dir.is_dir():
             continue
 
         # Use canonical path helper to get database file
-        paths = channel_db_paths(channels_dir, channel_dir.name)
+        paths = dialog_db_paths(dialogs_dir, dialog_dir.name)
         if not paths.db_file.exists():
             continue
 

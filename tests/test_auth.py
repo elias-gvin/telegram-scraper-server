@@ -25,7 +25,7 @@ from telegram_scraper.api import auth as api_qr_auth
 def tmp_data_dir(tmp_path):
     data = tmp_path / "data"
     data.mkdir()
-    (data / "channels").mkdir()
+    (data / "dialogs").mkdir()
     (data / "sessions").mkdir()
 
     settings = {

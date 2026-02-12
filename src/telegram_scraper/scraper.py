@@ -31,7 +31,7 @@ def transform_message_to_response(msg_dict: dict) -> dict:
     """
     # Remove internal database fields that shouldn't be in API response
     msg_dict.pop("id", None)
-    msg_dict.pop("channel_id", None)
+    msg_dict.pop("dialog_id", None)
     msg_dict.pop("media_path", None)
 
     # Keep media fields flat (media_type, media_uuid, media_size, media_original_filename)
@@ -126,7 +126,7 @@ def build_timeline(
 async def download_from_telegram_batched(
     client: TelegramClient,
     session: Session,
-    channel_id: int,
+    dialog_id: int,
     start_date: datetime,
     end_date: datetime,
     batch_size: int,
@@ -141,10 +141,10 @@ async def download_from_telegram_batched(
     Yields batches of MessageData.
     """
     batch = []
-    entity = await client.get_entity(channel_id)
+    entity = await client.get_entity(dialog_id)
 
-    # Get channel name from entity
-    channel_name = getattr(entity, "title", None)
+    # Get dialog name from entity
+    dialog_name = getattr(entity, "title", None)
 
     # Make dates timezone-aware
     if start_date.tzinfo is None:
@@ -191,7 +191,7 @@ async def download_from_telegram_batched(
                     result = await download_media(
                         message,
                         output_dir=output_dir,
-                        channel_id=channel_id,
+                        dialog_id=dialog_id,
                         max_media_size_mb=max_media_size_mb,
                         force_redownload=force_redownload,
                     )
@@ -204,8 +204,8 @@ async def download_from_telegram_batched(
 
             msg_data = MessageData(
                 message_id=message.id,
-                channel_id=channel_id,
-                channel_name=channel_name,
+                dialog_id=dialog_id,
+                dialog_name=dialog_name,
                 date=message.date.strftime("%Y-%m-%d %H:%M:%S"),
                 edit_date=message.edit_date.strftime("%Y-%m-%d %H:%M:%S")
                 if message.edit_date
@@ -239,14 +239,14 @@ async def download_from_telegram_batched(
                 # Save batch to DB atomically
                 try:
                     # First insert messages
-                    _batch_insert_messages(session, batch, channel_id)
+                    _batch_insert_messages(session, batch, dialog_id)
                     # Then store media metadata (requires messages to exist due to FK)
                     # Always create MediaFile when media exists, even if not downloaded
                     for msg in batch:
                         if msg.media_type:
                             msg.media_uuid = operations.store_media_with_uuid(
                                 session,
-                                channel_id=channel_id,
+                                dialog_id=dialog_id,
                                 message_id=msg.message_id,
                                 file_size=msg.media_size or 0,
                                 media_type=msg.media_type,
@@ -271,13 +271,13 @@ async def download_from_telegram_batched(
     if batch:
         try:
             # First insert messages
-            _batch_insert_messages(session, batch, channel_id)
+            _batch_insert_messages(session, batch, dialog_id)
             # Then store media metadata (requires messages to exist due to FK)
             for msg in batch:
                 if msg.media_type:
                     msg.media_uuid = operations.store_media_with_uuid(
                         session,
-                        channel_id=channel_id,
+                        dialog_id=dialog_id,
                         message_id=msg.message_id,
                         file_size=msg.media_size or 0,
                         media_type=msg.media_type,
@@ -296,7 +296,7 @@ async def download_from_telegram_batched(
 def _batch_insert_messages(
     session: Session,
     messages: List[MessageData],
-    channel_id: str | int,
+    dialog_id: str | int,
 ) -> None:
     """
     Insert messages without auto-committing (caller manages transaction).
@@ -309,7 +309,7 @@ def _batch_insert_messages(
     operations.batch_upsert_messages(
         session,
         messages,
-        channel_id=channel_id,
+        dialog_id=dialog_id,
         replace_existing=True,
         auto_commit=False,
     )
@@ -319,7 +319,7 @@ def _batch_insert_messages(
 async def stream_messages_with_cache(
     client: TelegramClient,
     session: Session,
-    channel_id: int,
+    dialog_id: int,
     start_date: datetime,
     end_date: datetime,
     telegram_batch_size: int,
@@ -346,7 +346,7 @@ async def stream_messages_with_cache(
         segments = [TimelineSegment(start_date, end_date, "telegram")]
     else:
         # Check cache and find gaps
-        cached_range_tuple = operations.get_cached_date_range(session, channel_id)
+        cached_range_tuple = operations.get_cached_date_range(session, dialog_id)
         # Convert tuple to DateRange object (ensure timezone-aware)
         if cached_range_tuple:
             # Database dates might be timezone-naive, so add UTC timezone if needed
@@ -381,7 +381,7 @@ async def stream_messages_with_cache(
             # Read from cache
             for batch in operations.iter_messages_in_range(
                 session,
-                channel_id,
+                dialog_id,
                 segment.start,
                 segment.end,
                 batch_size=telegram_batch_size,
@@ -418,7 +418,7 @@ async def stream_messages_with_cache(
                         if should_download:
                             try:
                                 tg_msg = await client.get_messages(
-                                    channel_id, ids=msg_dict["message_id"]
+                                    dialog_id, ids=msg_dict["message_id"]
                                 )
                                 if (
                                     tg_msg
@@ -430,7 +430,7 @@ async def stream_messages_with_cache(
                                     result = await download_media(
                                         tg_msg,
                                         output_dir=output_dir,
-                                        channel_id=channel_id,
+                                        dialog_id=dialog_id,
                                         max_media_size_mb=max_media_size_mb,
                                     )
                                     if result.status == "downloaded" and result.path:
@@ -484,7 +484,7 @@ async def stream_messages_with_cache(
             async for telegram_batch in download_from_telegram_batched(
                 client,
                 session,
-                channel_id,
+                dialog_id,
                 segment.start,
                 segment.end,
                 min(telegram_batch_size, client_batch_size),

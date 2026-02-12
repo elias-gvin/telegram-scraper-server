@@ -19,7 +19,7 @@ from ..database import (
     get_engine,
     create_db_and_tables,
     get_session,
-    ensure_channel_directories,
+    ensure_dialog_directories,
 )
 from ..scraper import stream_messages_with_cache
 
@@ -77,7 +77,7 @@ def parse_date(date_str: str) -> datetime:
 
 
 @router.get(
-    "/history/{channel_id}",
+    "/history/{dialog_id}",
     summary="Get message history",
     description="""
     Stream message history with smart caching via Server-Sent Events (SSE).
@@ -98,7 +98,7 @@ def parse_date(date_str: str) -> datetime:
     """,
 )
 async def get_history(
-    channel_id: Annotated[int, Path(description="Channel ID")],
+    dialog_id: Annotated[int, Path(description="Dialog ID")],
     start_date: Annotated[
         Optional[str],
         Query(
@@ -122,7 +122,7 @@ async def get_history(
     config: ServerConfig = Depends(get_config),
 ):
     """
-    Get message history for a channel.
+    Get message history for a dialog.
 
     Requires X-Telegram-Username header for authentication.
     """
@@ -146,33 +146,28 @@ async def get_history(
                 status_code=400, detail="start_date must be before end_date"
             )
 
-        # Ensure channel directory structure and initialize database
-        paths = ensure_channel_directories(config.channels_dir, channel_id)
+        # Ensure dialog directory structure and initialize database
+        paths = ensure_dialog_directories(config.dialogs_dir, dialog_id)
 
         # Create engine and tables
         engine = get_engine(paths.db_file, check_same_thread=False)
         create_db_and_tables(engine)
 
-        # Upsert channel info
+        # Upsert dialog info
         try:
-            entity = await client.get_entity(channel_id)
-            channel_name = getattr(entity, "title", None) or str(channel_id)
-
-            # Try to get channel creator if available
-            # Note: Not all channels expose creator info
-            creator_id = None
-            if hasattr(entity, "creator_id"):
-                creator_id = entity.creator_id
+            entity = await client.get_entity(dialog_id)
+            dialog_name = getattr(entity, "title", None) or str(dialog_id)
+            dialog_username = getattr(entity, "username", None)
 
             with get_session(paths.db_file, check_same_thread=False) as session:
-                operations.upsert_channel(
+                operations.upsert_dialog(
                     session,
-                    channel_id=str(channel_id),
-                    channel_name=channel_name,
-                    creator_id=creator_id,
+                    dialog_id=str(dialog_id),
+                    name=dialog_name,
+                    username=dialog_username,
                 )
         except Exception as e:
-            logger.warning(f"Could not update channel info: {e}")
+            logger.warning(f"Could not update dialog info: {e}")
 
         batch_size = chunk_size
 
@@ -182,7 +177,7 @@ async def get_history(
                     async for batch in stream_messages_with_cache(
                         client,
                         session,
-                        channel_id,
+                        dialog_id,
                         start_dt,
                         end_dt,
                         telegram_batch_size=config.telegram_batch_size,
@@ -190,7 +185,7 @@ async def get_history(
                         force_refresh=force_refresh,
                         scrape_media=config.download_media,
                         max_media_size_mb=config.max_media_size_mb,
-                        output_dir=config.channels_dir,
+                        output_dir=config.dialogs_dir,
                         repair_media=config.repair_media,
                     ):
                         yield f"data: {json.dumps({'messages': batch})}\n\n"

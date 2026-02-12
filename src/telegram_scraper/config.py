@@ -65,13 +65,13 @@ class ServerConfig:
 
         # Create directory structure
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.channels_dir.mkdir(parents=True, exist_ok=True)
+        self.dialogs_dir.mkdir(parents=True, exist_ok=True)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
     @property
-    def channels_dir(self) -> Path:
-        """Directory for per-channel databases and media."""
-        return self.data_dir / "channels"
+    def dialogs_dir(self) -> Path:
+        """Directory for per-dialog databases and media."""
+        return self.data_dir / "dialogs"
 
     @property
     def sessions_dir(self) -> Path:

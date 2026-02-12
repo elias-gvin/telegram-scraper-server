@@ -101,7 +101,7 @@ def create_app(config: ServerConfig) -> FastAPI:
                 "auth_qr_status": f"{API_PREFIX}/auth/qr/{{token}}",
                 "search_dialogs": f"{API_PREFIX}/search/dialogs",
                 "folders": f"{API_PREFIX}/folders",
-                "history": f"{API_PREFIX}/history/{{channel_id}}",
+                "history": f"{API_PREFIX}/history/{{dialog_id}}",
                 "files": f"{API_PREFIX}/files/{{file_uuid}}",
                 "settings": f"{API_PREFIX}/settings",
             },
@@ -120,7 +120,7 @@ def create_app(config: ServerConfig) -> FastAPI:
     "--data-dir",
     type=click.Path(path_type=Path),
     default="./data",
-    help="Data directory for sessions, channels, and settings (default: ./data)",
+    help="Data directory for sessions, dialogs, and settings (default: ./data)",
 )
 @click.option(
     "--host",
@@ -193,7 +193,7 @@ def main(
     logger.info("=" * 60)
     logger.info(f"API ID: {server_config.api_id}")
     logger.info(f"Data directory: {server_config.data_dir.resolve()}")
-    logger.info(f"  Channels: {server_config.channels_dir.resolve()}")
+    logger.info(f"  Dialogs: {server_config.dialogs_dir.resolve()}")
     logger.info(f"  Sessions: {server_config.sessions_dir.resolve()}")
     logger.info(f"Settings file: {server_config.settings_path}")
     logger.info(f"Download media: {server_config.download_media}")

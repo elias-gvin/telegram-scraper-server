@@ -8,15 +8,14 @@ from typing import Optional
 # This allows orphaned references and simpler data model
 
 
-class Channel(SQLModel, table=True):
-    """Channel metadata - standalone, no relationships."""
+class Dialog(SQLModel, table=True):
+    """Dialog metadata - standalone, no relationships."""
 
-    __tablename__ = "channels"
+    __tablename__ = "dialogs"
 
-    channel_id: int = Field(primary_key=True)
-    channel_name: str
-    channel_username: Optional[str] = None  # @channelname
-    creator_id: Optional[int] = None  # Just an int, no FK
+    dialog_id: int = Field(primary_key=True)
+    name: str
+    username: Optional[str] = None  # @username
 
 
 class User(SQLModel, table=True):
@@ -58,15 +57,15 @@ class Message(SQLModel, table=True):
     """Message data - no FKs except media_uuid."""
 
     __tablename__ = "messages"
-    # Note: message_id is not unique across channels, so we need to use a unique constraint to ensure that each message_id is unique within a channel.
+    # Note: message_id is not unique across dialogs, so we need to use a unique constraint to ensure that each message_id is unique within a dialog.
     __table_args__ = (
-        UniqueConstraint("channel_id", "message_id", name="uq_channel_message"),
+        UniqueConstraint("dialog_id", "message_id", name="uq_dialog_message"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)  # Auto-increment
 
-    # Channel context (no FK)
-    channel_id: int = Field(index=True)
+    # Dialog context (no FK)
+    dialog_id: int = Field(index=True)
 
     # Message identity
     message_id: int = Field(index=True)
@@ -84,7 +83,7 @@ class Message(SQLModel, table=True):
     # Reply context (no FK)
     reply_to: Optional[int] = Field(
         default=None, index=True
-    )  # message_id of replied-to message (in same channel)
+    )  # message_id of replied-to message (in same dialog)
 
     # Author/forward info
     post_author: Optional[str] = None

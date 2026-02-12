@@ -9,7 +9,7 @@ from telegram_scraper.database import (
     get_engine,
     create_db_and_tables,
     get_session,
-    ensure_channel_directories,
+    ensure_dialog_directories,
 )
 from telegram_scraper.database import operations
 
@@ -18,13 +18,13 @@ from telegram_scraper.database import operations
 # Helpers
 # ---------------------------------------------------------------------------
 
-CHANNEL_ID = 99999
+DIALOG_ID = 99999
 
 
 def _make_msg(msg_id: int) -> MessageData:
     return MessageData(
         message_id=msg_id,
-        channel_id=CHANNEL_ID,
+        dialog_id=DIALOG_ID,
         date="2025-01-01 00:00:00",
         sender_id=100,
         message="test message",
@@ -40,9 +40,9 @@ def _make_msg(msg_id: int) -> MessageData:
 @pytest.fixture
 def media_uuid(server_config):
     """
-    Create a fake channel DB + media file on disk and return the UUID.
+    Create a fake dialog DB + media file on disk and return the UUID.
     """
-    paths = ensure_channel_directories(server_config.channels_dir, CHANNEL_ID)
+    paths = ensure_dialog_directories(server_config.dialogs_dir, DIALOG_ID)
     engine = get_engine(paths.db_file)
     create_db_and_tables(engine)
 
@@ -51,13 +51,11 @@ def media_uuid(server_config):
     fake_file.write_bytes(b"\xff\xd8fake-jpeg-data")
 
     with get_session(paths.db_file) as session:
-        operations.upsert_channel(
-            session, channel_id=CHANNEL_ID, channel_name="Test Channel"
-        )
-        operations.batch_upsert_messages(session, [_make_msg(1)], channel_id=CHANNEL_ID)
+        operations.upsert_dialog(session, dialog_id=DIALOG_ID, name="Test Channel")
+        operations.batch_upsert_messages(session, [_make_msg(1)], dialog_id=DIALOG_ID)
         uuid = operations.store_media_with_uuid(
             session,
-            channel_id=CHANNEL_ID,
+            dialog_id=DIALOG_ID,
             message_id=1,
             file_size=fake_file.stat().st_size,
             media_type="MessageMediaPhoto",

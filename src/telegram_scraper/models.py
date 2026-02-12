@@ -12,7 +12,7 @@ class MessageData:
 
     # Core message identity
     message_id: int
-    channel_id: int
+    dialog_id: int
 
     # Timestamps
     date: str  # YYYY-MM-DD HH:MM:SS
@@ -27,7 +27,7 @@ class MessageData:
     is_forwarded: int
 
     # Extended (not from Telegram API)
-    channel_name: Optional[str] = None
+    dialog_name: Optional[str] = None
 
     # Timestamps (optional)
     edit_date: Optional[str] = None  # YYYY-MM-DD HH:MM:SS or None
