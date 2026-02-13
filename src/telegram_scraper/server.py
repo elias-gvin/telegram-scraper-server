@@ -22,6 +22,7 @@ from .api import (
     files_router,
     auth_router,
     settings_router,
+    search_router,
     API_PREFIX,
 )
 from .api import auth as api_qr_auth
@@ -87,6 +88,7 @@ def create_app(config: ServerConfig) -> FastAPI:
     api_router.include_router(files_router)
     api_router.include_router(auth_router)
     api_router.include_router(settings_router)
+    api_router.include_router(search_router)
     app.include_router(api_router)
 
     @app.get("/", tags=["root"])
@@ -100,6 +102,8 @@ def create_app(config: ServerConfig) -> FastAPI:
                 "auth_qr_start": f"{API_PREFIX}/auth/qr",
                 "auth_qr_status": f"{API_PREFIX}/auth/qr/{{token}}",
                 "search_dialogs": f"{API_PREFIX}/search/dialogs",
+                "search_messages": f"{API_PREFIX}/search/messages",
+                "search_messages_in_dialog": f"{API_PREFIX}/search/messages/{{dialog_id}}",
                 "folders": f"{API_PREFIX}/folders",
                 "history": f"{API_PREFIX}/history/{{dialog_id}}",
                 "files": f"{API_PREFIX}/files/{{file_uuid}}",

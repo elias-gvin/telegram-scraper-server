@@ -213,7 +213,86 @@ curl -s -H "X-Telegram-Username: $USERNAME" \
 ]
 ```
 
-### 3. Message History (SSE Streaming)
+### 3. Search Messages
+
+Search for messages containing specific words or phrases using Telegram's native search API. **No pre-caching required.**
+
+#### Within a specific dialog
+
+`GET /api/v3/search/messages/{dialog_id}`
+
+Uses Telegram's `messages.search` — works on any dialog, even if not previously scraped.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `q` | string | *required* | Search query (word or phrase to find) |
+| `start_date` | string | — | Upper bound — messages before this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
+| `end_date` | string | — | Lower bound — messages after this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
+| `from_user` | int | — | Only messages sent by this user ID |
+| `limit` | int | `50` | Maximum results (1–500) |
+
+#### Across all dialogs (global search)
+
+`GET /api/v3/search/messages`
+
+Uses Telegram's `messages.searchGlobal` — searches across all your chats at once.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `q` | string | *required* | Search query (word or phrase to find) |
+| `start_date` | string | — | Upper bound — messages before this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
+| `end_date` | string | — | Lower bound — messages after this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
+| `limit` | int | `50` | Maximum results (1–500) |
+
+**Response:**
+
+```json
+{
+  "query": "bitcoin",
+  "total": 12,
+  "limit": 50,
+  "results": [
+    {
+      "message_id": 4567,
+      "dialog_id": -1001234567890,
+      "dialog_name": "Crypto News",
+      "date": "2024-01-15 14:30:00",
+      "edit_date": null,
+      "sender_id": 123456789,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe",
+      "message": "Bitcoin just hit a new all-time high!",
+      "reply_to": null,
+      "post_author": null,
+      "is_forwarded": 0,
+      "forwarded_from_channel_id": null
+    }
+  ]
+}
+```
+
+**Examples:**
+
+```bash
+# Search in a specific chat
+curl -s -H "X-Telegram-Username: $USERNAME" \
+  "http://localhost:8000/api/v3/search/messages/-1001234567890?q=bitcoin"
+
+# Global search across all chats
+curl -s -H "X-Telegram-Username: $USERNAME" \
+  "http://localhost:8000/api/v3/search/messages?q=meeting"
+
+# Search with date range and sender filter
+curl -s -H "X-Telegram-Username: $USERNAME" \
+  "http://localhost:8000/api/v3/search/messages/-1001234567890?q=urgent&start_date=2024-06-30&end_date=2024-01-01&from_user=123456789"
+
+# Global search with limit
+curl -s -H "X-Telegram-Username: $USERNAME" \
+  "http://localhost:8000/api/v3/search/messages?q=invoice&limit=100"
+```
+
+### 4. Message History (SSE Streaming)
 
 `GET /api/v3/history/{dialog_id}`
 
@@ -278,7 +357,7 @@ Key details:
 - `media_original_filename` is `null` for photos (only documents/audio carry filenames)
 - `is_forwarded`: `0` or `1` (integer, not boolean)
 
-### 4. Download Media
+### 5. Download Media
 
 `GET /api/v3/files/{file_uuid}`
 
@@ -318,7 +397,7 @@ HOST_PATH="${CONTAINER_PATH/\/app\/data/\/root\/telegram-scraper-data}"
 cp "$HOST_PATH" ./my_file.jpg
 ```
 
-### 5. Settings
+### 6. Settings
 
 `GET /api/v3/settings` — read current settings
 `PATCH /api/v3/settings` — update (partial, only supplied fields change)

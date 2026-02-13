@@ -152,6 +152,10 @@ curl -H "X-Telegram-Username: john_doe" \
 curl -H "X-Telegram-Username: john_doe" \
   "http://localhost:8000/api/v3/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250"
 
+# Search messages across all chats
+curl -H "X-Telegram-Username: john_doe" \
+  "http://localhost:8000/api/v3/search/messages?q=hello"
+
 # Download media
 curl -H "X-Telegram-Username: john_doe" \
   "http://localhost:8000/api/v3/files/abc-123-uuid" -o photo.jpg
@@ -248,7 +252,20 @@ Stream message history with smart caching:
 - `chunk_size=250` - Stream in chunks (Server-Sent Events)
 - `force_refresh=true` - Bypass cache and re-download
 
-### 3. Media Files
+### 3. Search Messages
+
+```http
+GET /api/v3/search/messages?q={query}
+GET /api/v3/search/messages/{dialog_id}?q={query}
+Header: X-Telegram-Username: your_username
+```
+
+Search for messages containing specific words or phrases. Searches Telegram directly — no pre-caching required.
+- Global search: omit `dialog_id` to search across all chats (`messages.searchGlobal`)
+- Per-dialog search: include `dialog_id` to search within a specific chat (`messages.search`)
+- Optional filters: `start_date`, `end_date`, `from_user` (per-dialog only), `limit`
+
+### 4. Media Files
 
 ```http
 GET /api/v3/files/{uuid}
@@ -257,7 +274,7 @@ Header: X-Telegram-Username: your_username
 
 Download media file by UUID (provided in message response).
 
-### 4. Settings
+### 5. Settings
 
 ```http
 GET /api/v3/settings
