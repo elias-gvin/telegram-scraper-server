@@ -32,6 +32,37 @@ class TestGetSettings:
             "max_media_size_mb",
             "telegram_batch_size",
             "repair_media",
+            "download_file_types",
+        }
+
+    @pytest.mark.asyncio
+    async def test_download_file_types_default_all_true(self, client):
+        resp = await client.get("/api/v3/settings")
+        assert resp.status_code == 200
+        ft = resp.json()["download_file_types"]
+        assert ft == {
+            "photos": True,
+            "videos": True,
+            "voice_messages": True,
+            "video_messages": True,
+            "stickers": True,
+            "gifs": True,
+            "files": True,
+        }
+
+    @pytest.mark.asyncio
+    async def test_download_file_types_has_all_keys(self, client):
+        resp = await client.get("/api/v3/settings")
+        assert resp.status_code == 200
+        ft = resp.json()["download_file_types"]
+        assert set(ft.keys()) == {
+            "photos",
+            "videos",
+            "voice_messages",
+            "video_messages",
+            "stickers",
+            "gifs",
+            "files",
         }
 
 
@@ -115,6 +146,101 @@ class TestUpdateSettings:
         assert resp.status_code == 200
         assert resp.json()["max_media_size_mb"] is None
         assert server_config.max_media_size_mb is None
+
+
+# ---------------------------------------------------------------------------
+# PATCH /settings — download_file_types
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateDownloadFileTypes:
+    """PATCH /api/v3/settings — download_file_types nested field"""
+
+    @pytest.mark.asyncio
+    async def test_disable_single_type(self, client, server_config):
+        resp = await client.patch(
+            "/api/v3/settings",
+            json={"download_file_types": {"photos": False}},
+        )
+        assert resp.status_code == 200
+        ft = resp.json()["download_file_types"]
+        assert ft["photos"] is False
+        assert ft["videos"] is True
+        assert server_config.download_file_types["photos"] is False
+
+    @pytest.mark.asyncio
+    async def test_disable_multiple_types(self, client, server_config):
+        resp = await client.patch(
+            "/api/v3/settings",
+            json={
+                "download_file_types": {
+                    "videos": False,
+                    "stickers": False,
+                    "gifs": False,
+                }
+            },
+        )
+        assert resp.status_code == 200
+        ft = resp.json()["download_file_types"]
+        assert ft["videos"] is False
+        assert ft["stickers"] is False
+        assert ft["gifs"] is False
+        assert ft["photos"] is True
+
+    @pytest.mark.asyncio
+    async def test_re_enable_type(self, client, server_config):
+        await client.patch(
+            "/api/v3/settings",
+            json={"download_file_types": {"voice_messages": False}},
+        )
+        assert server_config.download_file_types["voice_messages"] is False
+
+        resp = await client.patch(
+            "/api/v3/settings",
+            json={"download_file_types": {"voice_messages": True}},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["download_file_types"]["voice_messages"] is True
+        assert server_config.download_file_types["voice_messages"] is True
+
+    @pytest.mark.asyncio
+    async def test_partial_update_leaves_other_file_types_unchanged(
+        self, client, server_config
+    ):
+        await client.patch(
+            "/api/v3/settings",
+            json={"download_file_types": {"files": False}},
+        )
+        resp = await client.get("/api/v3/settings")
+        ft = resp.json()["download_file_types"]
+        assert ft["files"] is False
+        assert ft["photos"] is True
+        assert ft["videos"] is True
+
+    @pytest.mark.asyncio
+    async def test_download_file_types_persisted_to_yaml(self, client, server_config):
+        import yaml
+
+        resp = await client.patch(
+            "/api/v3/settings",
+            json={"download_file_types": {"video_messages": False, "stickers": False}},
+        )
+        assert resp.status_code == 200
+
+        saved = yaml.safe_load(server_config.settings_path.read_text())
+        assert saved["download_file_types"]["video_messages"] is False
+        assert saved["download_file_types"]["stickers"] is False
+        assert saved["download_file_types"]["photos"] is True
+
+    @pytest.mark.asyncio
+    async def test_get_reflects_patched_file_types(self, client):
+        await client.patch(
+            "/api/v3/settings",
+            json={"download_file_types": {"gifs": False}},
+        )
+        resp = await client.get("/api/v3/settings")
+        assert resp.status_code == 200
+        assert resp.json()["download_file_types"]["gifs"] is False
 
 
 # ---------------------------------------------------------------------------

@@ -23,12 +23,24 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+# Default per-file-type download toggles
+FILE_TYPE_DEFAULTS: dict = {
+    "photos": True,
+    "videos": True,
+    "voice_messages": True,
+    "video_messages": True,
+    "stickers": True,
+    "gifs": True,
+    "files": True,
+}
+
 # Default values for runtime-tunable settings
 SETTINGS_DEFAULTS = {
     "download_media": True,
     "max_media_size_mb": 20,
     "telegram_batch_size": 100,
     "repair_media": False,
+    "download_file_types": FILE_TYPE_DEFAULTS,
 }
 
 
@@ -52,6 +64,7 @@ class ServerConfig:
     max_media_size_mb: Optional[float] = 20  # None = no limit
     telegram_batch_size: int = 100
     repair_media: bool = False
+    download_file_types: dict = field(default_factory=lambda: dict(FILE_TYPE_DEFAULTS))
 
     # Internal: path to the active settings.yaml file
     settings_path: Optional[Path] = field(default=None, repr=False)
@@ -124,6 +137,12 @@ def load_settings(settings_path: Path) -> dict:
         result["telegram_batch_size"] = int(data["telegram_batch_size"])
     if "repair_media" in data:
         result["repair_media"] = bool(data["repair_media"])
+    if "download_file_types" in data and isinstance(data["download_file_types"], dict):
+        parsed = dict(FILE_TYPE_DEFAULTS)
+        for key in FILE_TYPE_DEFAULTS:
+            if key in data["download_file_types"]:
+                parsed[key] = bool(data["download_file_types"][key])
+        result["download_file_types"] = parsed
 
     return result
 
@@ -143,6 +162,7 @@ def save_settings(config: ServerConfig) -> None:
         "max_media_size_mb": config.max_media_size_mb,
         "telegram_batch_size": config.telegram_batch_size,
         "repair_media": config.repair_media,
+        "download_file_types": config.download_file_types,
     }
 
     with open(config.settings_path, "w") as f:

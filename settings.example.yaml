@@ -5,4 +5,12 @@ download_media: true
 max_media_size_mb: 20
 telegram_batch_size: 100
 repair_media: false
+download_file_types:
+  photos: true
+  videos: true
+  voice_messages: true
+  video_messages: true
+  stickers: true
+  gifs: true
+  files: true
 

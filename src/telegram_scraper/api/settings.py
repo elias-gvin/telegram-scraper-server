@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from .auth_utils import get_authenticated_user
 from .deps import get_config
-from ..config import ServerConfig, save_settings
+from ..config import ServerConfig, FILE_TYPE_DEFAULTS, save_settings
 
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -25,6 +25,30 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+class DownloadFileTypesResponse(BaseModel):
+    """Per-file-type download toggles (read-only view)."""
+
+    photos: bool
+    videos: bool
+    voice_messages: bool
+    video_messages: bool
+    stickers: bool
+    gifs: bool
+    files: bool
+
+
+class DownloadFileTypesUpdate(BaseModel):
+    """Partial update for per-file-type download toggles."""
+
+    photos: Optional[bool] = None
+    videos: Optional[bool] = None
+    voice_messages: Optional[bool] = None
+    video_messages: Optional[bool] = None
+    stickers: Optional[bool] = None
+    gifs: Optional[bool] = None
+    files: Optional[bool] = None
+
+
 class SettingsResponse(BaseModel):
     """Current server settings (read-only view)."""
 
@@ -32,6 +56,7 @@ class SettingsResponse(BaseModel):
     max_media_size_mb: Optional[float]
     telegram_batch_size: int
     repair_media: bool
+    download_file_types: DownloadFileTypesResponse
 
 
 class SettingsUpdate(BaseModel):
@@ -58,6 +83,10 @@ class SettingsUpdate(BaseModel):
         default=None,
         description="If true, re-download media that was previously skipped due to parameter restrictions",
     )
+    download_file_types: Optional[DownloadFileTypesUpdate] = Field(
+        default=None,
+        description="Per-file-type download toggles (photos, videos, voice_messages, video_messages, stickers, gifs, files)",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -75,11 +104,21 @@ async def get_settings(
     username: str = Depends(get_authenticated_user),
     config: ServerConfig = Depends(get_config),
 ):
+    ft = config.download_file_types
     return SettingsResponse(
         download_media=config.download_media,
         max_media_size_mb=config.max_media_size_mb,
         telegram_batch_size=config.telegram_batch_size,
         repair_media=config.repair_media,
+        download_file_types=DownloadFileTypesResponse(
+            photos=ft.get("photos", True),
+            videos=ft.get("videos", True),
+            voice_messages=ft.get("voice_messages", True),
+            video_messages=ft.get("video_messages", True),
+            stickers=ft.get("stickers", True),
+            gifs=ft.get("gifs", True),
+            files=ft.get("files", True),
+        ),
     )
 
 
@@ -124,6 +163,14 @@ async def update_settings(
     if body.repair_media is not None:
         config.repair_media = body.repair_media
 
+    if body.download_file_types is not None:
+        update_ft = body.download_file_types.model_dump(exclude_unset=True)
+        merged = dict(config.download_file_types)
+        for key, val in update_ft.items():
+            if val is not None:
+                merged[key] = val
+        config.download_file_types = merged
+
     # Persist to settings.yaml
     try:
         save_settings(config)
@@ -133,9 +180,19 @@ async def update_settings(
 
     logger.info("Settings updated by %s: %s", username, update_data)
 
+    ft = config.download_file_types
     return SettingsResponse(
         download_media=config.download_media,
         max_media_size_mb=config.max_media_size_mb,
         telegram_batch_size=config.telegram_batch_size,
         repair_media=config.repair_media,
+        download_file_types=DownloadFileTypesResponse(
+            photos=ft.get("photos", True),
+            videos=ft.get("videos", True),
+            voice_messages=ft.get("voice_messages", True),
+            video_messages=ft.get("video_messages", True),
+            stickers=ft.get("stickers", True),
+            gifs=ft.get("gifs", True),
+            files=ft.get("files", True),
+        ),
     )

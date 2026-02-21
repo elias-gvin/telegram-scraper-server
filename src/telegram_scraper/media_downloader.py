@@ -9,6 +9,10 @@ from telethon.tl.types import (
     MessageMediaPhoto,
     MessageMediaDocument,
     MessageMediaWebPage,
+    DocumentAttributeVideo,
+    DocumentAttributeAudio,
+    DocumentAttributeSticker,
+    DocumentAttributeAnimated,
 )
 from telethon.errors import FloodWaitError
 
@@ -64,12 +68,50 @@ def get_media_metadata(message) -> Optional[MediaMetadata]:
     )
 
 
+def classify_media_category(message) -> Optional[str]:
+    """
+    Classify a Telegram message's media into one of the user-facing categories.
+
+    Returns one of: "photos", "videos", "voice_messages", "video_messages",
+    "stickers", "gifs", "files", or None if the message has no downloadable media.
+    """
+    if not message.media:
+        return None
+    if isinstance(message.media, MessageMediaWebPage):
+        return None
+    if isinstance(message.media, MessageMediaPhoto):
+        return "photos"
+    if isinstance(message.media, MessageMediaDocument):
+        attrs = (
+            getattr(getattr(message.media, "document", None), "attributes", []) or []
+        )
+        for attr in attrs:
+            if isinstance(attr, DocumentAttributeSticker):
+                return "stickers"
+        for attr in attrs:
+            if isinstance(attr, DocumentAttributeAnimated):
+                return "gifs"
+        for attr in attrs:
+            if isinstance(attr, DocumentAttributeAudio) and getattr(
+                attr, "voice", False
+            ):
+                return "voice_messages"
+        for attr in attrs:
+            if isinstance(attr, DocumentAttributeVideo):
+                if getattr(attr, "round_message", False):
+                    return "video_messages"
+                return "videos"
+        return "files"
+    return None
+
+
 async def download_media(
     message,  # Telethon Message object
     output_dir: Path,
     dialog_id: int,
     max_media_size_mb: Optional[float] = None,
     force_redownload: bool = False,
+    download_file_types: Optional[dict] = None,
 ) -> MediaDownloadResult:
     """
     Download media from a Telegram message.
@@ -79,6 +121,8 @@ async def download_media(
         output_dir: Base output directory
         dialog_id: Dialog ID for organizing media
         max_media_size_mb: Optional size limit in MB (None = no limit)
+        download_file_types: Optional dict mapping category names to bools;
+            if provided, categories set to False are skipped.
 
     Returns:
         MediaDownloadResult with status and path
@@ -129,6 +173,15 @@ async def download_media(
                         status="skipped",
                         error_text=f"skipped_by_size_limit bytes={size_bytes} max_bytes={max_bytes}",
                     )
+
+        # Check file-type filter
+        if download_file_types is not None:
+            category = classify_media_category(message)
+            if category is not None and not download_file_types.get(category, True):
+                return MediaDownloadResult(
+                    status="skipped",
+                    error_text=f"skipped_by_file_type category={category}",
+                )
 
         # Determine filename
         if isinstance(message.media, MessageMediaPhoto):

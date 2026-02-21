@@ -187,6 +187,7 @@ async def get_history(
                         max_media_size_mb=config.max_media_size_mb,
                         output_dir=config.dialogs_dir,
                         repair_media=config.repair_media,
+                        download_file_types=config.download_file_types,
                     ):
                         yield f"data: {json.dumps({'messages': batch})}\n\n"
                 finally:
