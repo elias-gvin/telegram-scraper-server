@@ -409,7 +409,8 @@ cp "$HOST_PATH" ./my_file.jpg
 | `download_media` | `true` | Download media files during history scraping |
 | `max_media_size_mb` | `20` | Max media size in MB. `0` or `null` = no limit. **Media over 20MB is skipped by default.** |
 | `telegram_batch_size` | `100` | Batch size for Telegram API downloads (must be > 0) |
-| `repair_media` | `false` | Re-download media previously skipped due to size limits or disabled downloads |
+| `repair_media` | `true` | Re-download media previously skipped due to size limits or disabled downloads |
+| `download_file_types` | object (see below) | Per-type download toggles: `photos`, `videos`, `voice_messages`, `video_messages`, `stickers`, `gifs`, `files`. Defaults: all `true` except `videos: false`. |
 
 **Update example:**
 

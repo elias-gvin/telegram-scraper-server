@@ -40,7 +40,7 @@ class DownloadFileTypes(BaseModel):
     """Per-file-type download toggles."""
 
     photos: bool = True
-    videos: bool = True
+    videos: bool = False
     voice_messages: bool = True
     video_messages: bool = True
     stickers: bool = True
@@ -54,7 +54,7 @@ class RuntimeSettings(BaseModel):
     download_media: bool = True
     max_media_size_mb: Optional[float] = 20  # None = no limit
     telegram_batch_size: int = 100
-    repair_media: bool = False
+    repair_media: bool = True
     download_file_types: DownloadFileTypes = Field(default_factory=DownloadFileTypes)
 
 

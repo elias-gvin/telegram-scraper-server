@@ -175,7 +175,7 @@ The configuration is retrieved from three distinct sources:
 | `api_id`, `api_hash` | `.env` / environment variables | Edit `.env`, restart |
 | `data_dir` | CLI `--data-dir` | `tgsc-server --data-dir ./my-data` |
 | `host`, `port` | CLI `--host` / `--port` | `tgsc-server --port 9000` |
-| `download_media`, `max_media_size_mb`, `telegram_batch_size` | `settings.yaml` in data dir | API or edit file |
+| `download_media`, `max_media_size_mb`, `telegram_batch_size`, `repair_media`, `download_file_types` | `settings.yaml` in data dir | API or edit file |
 
 ### Data Directory Layout
 
@@ -282,7 +282,7 @@ PATCH /api/v3/settings
 Header: X-Telegram-Username: your_username
 ```
 
-Read and update runtime settings (`download_media`, `max_media_size_mb`, `telegram_batch_size`).
+Read and update runtime settings (`download_media`, `max_media_size_mb`, `telegram_batch_size`, `repair_media`, `download_file_types`).
 
 ## Documentation
 
