@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from .auth_utils import get_authenticated_user
 from .deps import get_config
-from ..config import ServerConfig, FILE_TYPE_DEFAULTS, save_settings
+from ..config import ServerConfig, save_settings
 
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class DownloadFileTypesResponse(BaseModel):
-    """Per-file-type download toggles (read-only view)."""
+    """Per-file-type download toggles (API response view)."""
 
     photos: bool
     videos: bool
@@ -104,20 +104,14 @@ async def get_settings(
     username: str = Depends(get_authenticated_user),
     config: ServerConfig = Depends(get_config),
 ):
-    ft = config.download_file_types
+    s = config.settings
     return SettingsResponse(
-        download_media=config.download_media,
-        max_media_size_mb=config.max_media_size_mb,
-        telegram_batch_size=config.telegram_batch_size,
-        repair_media=config.repair_media,
-        download_file_types=DownloadFileTypesResponse(
-            photos=ft.get("photos", True),
-            videos=ft.get("videos", True),
-            voice_messages=ft.get("voice_messages", True),
-            video_messages=ft.get("video_messages", True),
-            stickers=ft.get("stickers", True),
-            gifs=ft.get("gifs", True),
-            files=ft.get("files", True),
+        download_media=s.download_media,
+        max_media_size_mb=s.max_media_size_mb,
+        telegram_batch_size=s.telegram_batch_size,
+        repair_media=s.repair_media,
+        download_file_types=DownloadFileTypesResponse.model_validate(
+            s.download_file_types.model_dump()
         ),
     )
 
@@ -149,27 +143,26 @@ async def update_settings(
         raise HTTPException(status_code=422, detail="No fields provided for update")
 
     # Apply changes to in-memory config
+    s = config.settings
     if body.download_media is not None:
-        config.download_media = body.download_media
+        s.download_media = body.download_media
 
     if "max_media_size_mb" in update_data:
         # Treat 0 as "no limit"
         val = body.max_media_size_mb
-        config.max_media_size_mb = None if (val is None or val == 0) else val
+        s.max_media_size_mb = None if (val is None or val == 0) else val
 
     if body.telegram_batch_size is not None:
-        config.telegram_batch_size = body.telegram_batch_size
+        s.telegram_batch_size = body.telegram_batch_size
 
     if body.repair_media is not None:
-        config.repair_media = body.repair_media
+        s.repair_media = body.repair_media
 
     if body.download_file_types is not None:
-        update_ft = body.download_file_types.model_dump(exclude_unset=True)
-        merged = dict(config.download_file_types)
-        for key, val in update_ft.items():
-            if val is not None:
-                merged[key] = val
-        config.download_file_types = merged
+        update_ft = body.download_file_types.model_dump(
+            exclude_unset=True, exclude_none=True
+        )
+        s.download_file_types = s.download_file_types.model_copy(update=update_ft)
 
     # Persist to settings.yaml
     try:
@@ -180,19 +173,13 @@ async def update_settings(
 
     logger.info("Settings updated by %s: %s", username, update_data)
 
-    ft = config.download_file_types
+    s = config.settings
     return SettingsResponse(
-        download_media=config.download_media,
-        max_media_size_mb=config.max_media_size_mb,
-        telegram_batch_size=config.telegram_batch_size,
-        repair_media=config.repair_media,
-        download_file_types=DownloadFileTypesResponse(
-            photos=ft.get("photos", True),
-            videos=ft.get("videos", True),
-            voice_messages=ft.get("voice_messages", True),
-            video_messages=ft.get("video_messages", True),
-            stickers=ft.get("stickers", True),
-            gifs=ft.get("gifs", True),
-            files=ft.get("files", True),
+        download_media=s.download_media,
+        max_media_size_mb=s.max_media_size_mb,
+        telegram_batch_size=s.telegram_batch_size,
+        repair_media=s.repair_media,
+        download_file_types=DownloadFileTypesResponse.model_validate(
+            s.download_file_types.model_dump()
         ),
     )

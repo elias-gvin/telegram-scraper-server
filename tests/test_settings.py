@@ -19,9 +19,9 @@ class TestGetSettings:
         resp = await client.get("/api/v3/settings")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["download_media"] == server_config.download_media
-        assert data["max_media_size_mb"] == server_config.max_media_size_mb
-        assert data["telegram_batch_size"] == server_config.telegram_batch_size
+        assert data["download_media"] == server_config.settings.download_media
+        assert data["max_media_size_mb"] == server_config.settings.max_media_size_mb
+        assert data["telegram_batch_size"] == server_config.settings.telegram_batch_size
 
     @pytest.mark.asyncio
     async def test_response_has_no_extra_fields(self, client):
@@ -76,27 +76,27 @@ class TestUpdateSettings:
 
     @pytest.mark.asyncio
     async def test_update_download_media(self, client, server_config):
-        assert server_config.download_media is False  # conftest default
+        assert server_config.settings.download_media is False  # conftest default
 
         resp = await client.patch("/api/v3/settings", json={"download_media": True})
         assert resp.status_code == 200
         assert resp.json()["download_media"] is True
         # In-memory config should be updated
-        assert server_config.download_media is True
+        assert server_config.settings.download_media is True
 
     @pytest.mark.asyncio
     async def test_update_max_media_size_mb(self, client, server_config):
         resp = await client.patch("/api/v3/settings", json={"max_media_size_mb": 50})
         assert resp.status_code == 200
         assert resp.json()["max_media_size_mb"] == 50
-        assert server_config.max_media_size_mb == 50
+        assert server_config.settings.max_media_size_mb == 50
 
     @pytest.mark.asyncio
     async def test_update_telegram_batch_size(self, client, server_config):
         resp = await client.patch("/api/v3/settings", json={"telegram_batch_size": 200})
         assert resp.status_code == 200
         assert resp.json()["telegram_batch_size"] == 200
-        assert server_config.telegram_batch_size == 200
+        assert server_config.settings.telegram_batch_size == 200
 
     @pytest.mark.asyncio
     async def test_update_multiple_fields(self, client, server_config):
@@ -118,7 +118,7 @@ class TestUpdateSettings:
     async def test_partial_update_leaves_other_fields_unchanged(
         self, client, server_config
     ):
-        original_batch = server_config.telegram_batch_size
+        original_batch = server_config.settings.telegram_batch_size
         resp = await client.patch("/api/v3/settings", json={"download_media": True})
         assert resp.status_code == 200
         assert resp.json()["telegram_batch_size"] == original_batch
@@ -133,19 +133,19 @@ class TestUpdateSettings:
         resp = await client.patch("/api/v3/settings", json={"max_media_size_mb": 0})
         assert resp.status_code == 200
         assert resp.json()["max_media_size_mb"] is None
-        assert server_config.max_media_size_mb is None
+        assert server_config.settings.max_media_size_mb is None
 
     @pytest.mark.asyncio
     async def test_max_media_size_null_means_no_limit(self, client, server_config):
         # First set to a value
         await client.patch("/api/v3/settings", json={"max_media_size_mb": 10})
-        assert server_config.max_media_size_mb == 10
+        assert server_config.settings.max_media_size_mb == 10
 
         # Then set to null
         resp = await client.patch("/api/v3/settings", json={"max_media_size_mb": None})
         assert resp.status_code == 200
         assert resp.json()["max_media_size_mb"] is None
-        assert server_config.max_media_size_mb is None
+        assert server_config.settings.max_media_size_mb is None
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +166,7 @@ class TestUpdateDownloadFileTypes:
         ft = resp.json()["download_file_types"]
         assert ft["photos"] is False
         assert ft["videos"] is True
-        assert server_config.download_file_types["photos"] is False
+        assert server_config.settings.download_file_types.photos is False
 
     @pytest.mark.asyncio
     async def test_disable_multiple_types(self, client, server_config):
@@ -193,7 +193,7 @@ class TestUpdateDownloadFileTypes:
             "/api/v3/settings",
             json={"download_file_types": {"voice_messages": False}},
         )
-        assert server_config.download_file_types["voice_messages"] is False
+        assert server_config.settings.download_file_types.voice_messages is False
 
         resp = await client.patch(
             "/api/v3/settings",
@@ -201,7 +201,7 @@ class TestUpdateDownloadFileTypes:
         )
         assert resp.status_code == 200
         assert resp.json()["download_file_types"]["voice_messages"] is True
-        assert server_config.download_file_types["voice_messages"] is True
+        assert server_config.settings.download_file_types.voice_messages is True
 
     @pytest.mark.asyncio
     async def test_partial_update_leaves_other_file_types_unchanged(

@@ -13,35 +13,49 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from enum import StrEnum
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 import yaml
 
 
 logger = logging.getLogger(__name__)
 
-# Default per-file-type download toggles
-FILE_TYPE_DEFAULTS: dict = {
-    "photos": True,
-    "videos": True,
-    "voice_messages": True,
-    "video_messages": True,
-    "stickers": True,
-    "gifs": True,
-    "files": True,
-}
 
-# Default values for runtime-tunable settings
-SETTINGS_DEFAULTS = {
-    "download_media": True,
-    "max_media_size_mb": 20,
-    "telegram_batch_size": 100,
-    "repair_media": False,
-    "download_file_types": FILE_TYPE_DEFAULTS,
-}
+class MediaCategory(StrEnum):
+    PHOTOS = "photos"
+    VIDEOS = "videos"
+    VOICE_MESSAGES = "voice_messages"
+    VIDEO_MESSAGES = "video_messages"
+    STICKERS = "stickers"
+    GIFS = "gifs"
+    FILES = "files"
+
+
+class DownloadFileTypes(BaseModel):
+    """Per-file-type download toggles."""
+
+    photos: bool = True
+    videos: bool = True
+    voice_messages: bool = True
+    video_messages: bool = True
+    stickers: bool = True
+    gifs: bool = True
+    files: bool = True
+
+
+class RuntimeSettings(BaseModel):
+    """Runtime-tunable settings (from settings.yaml)."""
+
+    download_media: bool = True
+    max_media_size_mb: Optional[float] = 20  # None = no limit
+    telegram_batch_size: int = 100
+    repair_media: bool = False
+    download_file_types: DownloadFileTypes = Field(default_factory=DownloadFileTypes)
 
 
 @dataclass
@@ -60,11 +74,7 @@ class ServerConfig:
     port: int = 8000
 
     # Runtime-tunable settings (from settings.yaml)
-    download_media: bool = True
-    max_media_size_mb: Optional[float] = 20  # None = no limit
-    telegram_batch_size: int = 100
-    repair_media: bool = False
-    download_file_types: dict = field(default_factory=lambda: dict(FILE_TYPE_DEFAULTS))
+    settings: RuntimeSettings = field(default_factory=RuntimeSettings)
 
     # Internal: path to the active settings.yaml file
     settings_path: Optional[Path] = field(default=None, repr=False)
@@ -121,30 +131,16 @@ def load_credentials_from_env() -> dict:
     return creds
 
 
-def load_settings(settings_path: Path) -> dict:
+def load_settings(settings_path: Path) -> RuntimeSettings:
     """Load runtime-tunable settings from a YAML file."""
     with open(settings_path, "r") as f:
         data = yaml.safe_load(f) or {}
-
-    # Only extract known tunable keys
-    result = {}
-    if "download_media" in data:
-        result["download_media"] = bool(data["download_media"])
-    if "max_media_size_mb" in data:
-        val = data["max_media_size_mb"]
-        result["max_media_size_mb"] = None if val is None else float(val)
-    if "telegram_batch_size" in data:
-        result["telegram_batch_size"] = int(data["telegram_batch_size"])
-    if "repair_media" in data:
-        result["repair_media"] = bool(data["repair_media"])
-    if "download_file_types" in data and isinstance(data["download_file_types"], dict):
-        parsed = dict(FILE_TYPE_DEFAULTS)
-        for key in FILE_TYPE_DEFAULTS:
-            if key in data["download_file_types"]:
-                parsed[key] = bool(data["download_file_types"][key])
-        result["download_file_types"] = parsed
-
-    return result
+    # # Drop invalid download_file_types so we get model default
+    # if "download_file_types" in data and not isinstance(
+    #     data.get("download_file_types"), dict
+    # ):
+    #     del data["download_file_types"]
+    return RuntimeSettings.model_validate(data)
 
 
 def save_settings(config: ServerConfig) -> None:
@@ -157,18 +153,12 @@ def save_settings(config: ServerConfig) -> None:
         logger.warning("No settings_path set — cannot persist settings")
         return
 
-    data = {
-        "download_media": config.download_media,
-        "max_media_size_mb": config.max_media_size_mb,
-        "telegram_batch_size": config.telegram_batch_size,
-        "repair_media": config.repair_media,
-        "download_file_types": config.download_file_types,
-    }
-
     with open(config.settings_path, "w") as f:
         f.write("# Telegram Scraper — Runtime Settings\n")
         f.write("# These values can be changed via the /settings API endpoint.\n\n")
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        yaml.dump(
+            config.settings.model_dump(), f, default_flow_style=False, sort_keys=False
+        )
 
 
 def resolve_settings_file(
@@ -209,14 +199,17 @@ def resolve_settings_file(
             logger.info(
                 "No settings.yaml found in %s — creating with defaults", data_dir
             )
-            # Write defaults
-            data = dict(SETTINGS_DEFAULTS)
             with open(canonical, "w") as f:
                 f.write(
                     "# Telegram Scraper — Runtime Settings\n"
                     "# These values can be changed via the /settings API endpoint.\n\n"
                 )
-                yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+                yaml.dump(
+                    RuntimeSettings().model_dump(),
+                    f,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
 
     logger.info("Using settings file: %s", canonical)
     return canonical

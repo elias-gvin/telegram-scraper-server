@@ -180,14 +180,10 @@ async def get_history(
                         dialog_id,
                         start_dt,
                         end_dt,
-                        telegram_batch_size=config.telegram_batch_size,
+                        settings=config.settings,
                         client_batch_size=batch_size,
                         force_refresh=force_refresh,
-                        scrape_media=config.download_media,
-                        max_media_size_mb=config.max_media_size_mb,
                         output_dir=config.dialogs_dir,
-                        repair_media=config.repair_media,
-                        download_file_types=config.download_file_types,
                     ):
                         yield f"data: {json.dumps({'messages': batch})}\n\n"
                 finally:

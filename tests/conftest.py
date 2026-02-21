@@ -8,7 +8,7 @@ import yaml
 from httpx import AsyncClient, ASGITransport
 
 from telegram_scraper.server import create_app
-from telegram_scraper.config import ServerConfig
+from telegram_scraper.config import ServerConfig, RuntimeSettings
 from telegram_scraper.api.auth_utils import get_telegram_client, get_authenticated_user
 
 from .mock_telegram import MockTelegramClient
@@ -54,9 +54,12 @@ def server_config(tmp_data_dir):
         api_id="12345",
         api_hash="fakehash",
         data_dir=tmp_data_dir,
-        download_media=False,
-        telegram_batch_size=50,
-        max_media_size_mb=None,
+        settings=RuntimeSettings(
+            download_media=False,
+            telegram_batch_size=50,
+            max_media_size_mb=None,
+            repair_media=False,
+        ),
         settings_path=tmp_data_dir / "settings.yaml",
     )
 

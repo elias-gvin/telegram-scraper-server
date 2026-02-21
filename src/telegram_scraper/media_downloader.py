@@ -16,6 +16,8 @@ from telethon.tl.types import (
 )
 from telethon.errors import FloodWaitError
 
+from .config import MediaCategory, DownloadFileTypes, RuntimeSettings
+
 
 @dataclass(frozen=True)
 class MediaMetadata:
@@ -68,40 +70,39 @@ def get_media_metadata(message) -> Optional[MediaMetadata]:
     )
 
 
-def classify_media_category(message) -> Optional[str]:
+def classify_media_category(message) -> Optional[MediaCategory]:
     """
     Classify a Telegram message's media into one of the user-facing categories.
 
-    Returns one of: "photos", "videos", "voice_messages", "video_messages",
-    "stickers", "gifs", "files", or None if the message has no downloadable media.
+    Returns a MediaCategory or None if the message has no downloadable media.
     """
     if not message.media:
         return None
     if isinstance(message.media, MessageMediaWebPage):
         return None
     if isinstance(message.media, MessageMediaPhoto):
-        return "photos"
+        return MediaCategory.PHOTOS
     if isinstance(message.media, MessageMediaDocument):
         attrs = (
             getattr(getattr(message.media, "document", None), "attributes", []) or []
         )
         for attr in attrs:
             if isinstance(attr, DocumentAttributeSticker):
-                return "stickers"
+                return MediaCategory.STICKERS
         for attr in attrs:
             if isinstance(attr, DocumentAttributeAnimated):
-                return "gifs"
+                return MediaCategory.GIFS
         for attr in attrs:
             if isinstance(attr, DocumentAttributeAudio) and getattr(
                 attr, "voice", False
             ):
-                return "voice_messages"
+                return MediaCategory.VOICE_MESSAGES
         for attr in attrs:
             if isinstance(attr, DocumentAttributeVideo):
                 if getattr(attr, "round_message", False):
-                    return "video_messages"
-                return "videos"
-        return "files"
+                    return MediaCategory.VIDEO_MESSAGES
+                return MediaCategory.VIDEOS
+        return MediaCategory.FILES
     return None
 
 
@@ -109,9 +110,8 @@ async def download_media(
     message,  # Telethon Message object
     output_dir: Path,
     dialog_id: int,
-    max_media_size_mb: Optional[float] = None,
     force_redownload: bool = False,
-    download_file_types: Optional[dict] = None,
+    settings: Optional[RuntimeSettings] = None,
 ) -> MediaDownloadResult:
     """
     Download media from a Telegram message.
@@ -120,9 +120,8 @@ async def download_media(
         message: Telethon Message object
         output_dir: Base output directory
         dialog_id: Dialog ID for organizing media
-        max_media_size_mb: Optional size limit in MB (None = no limit)
-        download_file_types: Optional dict mapping category names to bools;
-            if provided, categories set to False are skipped.
+        settings: Optional runtime settings (size limit and per-type toggles).
+            If None, no size limit and all types allowed.
 
     Returns:
         MediaDownloadResult with status and path
@@ -154,6 +153,7 @@ async def download_media(
                 f.unlink(missing_ok=True)
 
         # Check media size limit
+        max_media_size_mb = settings.max_media_size_mb if settings else None
         if max_media_size_mb is not None:
             try:
                 max_bytes = int(float(max_media_size_mb) * 1024 * 1024)
@@ -175,9 +175,10 @@ async def download_media(
                     )
 
         # Check file-type filter
+        download_file_types = settings.download_file_types if settings else None
         if download_file_types is not None:
             category = classify_media_category(message)
-            if category is not None and not download_file_types.get(category, True):
+            if category is not None and not getattr(download_file_types, category):
                 return MediaDownloadResult(
                     status="skipped",
                     error_text=f"skipped_by_file_type category={category}",

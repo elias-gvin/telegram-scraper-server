@@ -18,6 +18,7 @@ from sqlmodel import Session
 from .database import operations
 from .models import MessageData, DateRange, TimelineSegment
 from .media_downloader import download_media, get_media_metadata
+from .config import RuntimeSettings
 
 
 logger = logging.getLogger(__name__)
@@ -130,11 +131,9 @@ async def download_from_telegram_batched(
     start_date: datetime,
     end_date: datetime,
     batch_size: int,
-    scrape_media: bool,
-    max_media_size_mb: Optional[float],
+    settings: RuntimeSettings,
     output_dir: Path,
     force_redownload: bool = False,
-    download_file_types: Optional[dict] = None,
 ) -> AsyncIterator[List[MessageData]]:
     """
     Download messages from Telegram in batches and save to DB.
@@ -188,14 +187,13 @@ async def download_from_telegram_batched(
                 media_original_filename = metadata.original_filename
 
                 # Actually download only if settings allow
-                if scrape_media:
+                if settings.download_media:
                     result = await download_media(
                         message,
                         output_dir=output_dir,
                         dialog_id=dialog_id,
-                        max_media_size_mb=max_media_size_mb,
                         force_redownload=force_redownload,
-                        download_file_types=download_file_types,
+                        settings=settings,
                     )
                     if result.status == "downloaded" and result.path:
                         media_path = result.path
@@ -324,21 +322,17 @@ async def stream_messages_with_cache(
     dialog_id: int,
     start_date: datetime,
     end_date: datetime,
-    telegram_batch_size: int,
+    settings: RuntimeSettings,
     client_batch_size: int,
     force_refresh: bool,
-    scrape_media: bool,
-    max_media_size_mb: Optional[float],
     output_dir: Path,
-    repair_media: bool = False,
-    download_file_types: Optional[dict] = None,
 ) -> AsyncIterator[List[dict]]:
     """
     Stream messages with cache awareness.
 
-    When *repair_media* is ``True`` and a cached message has media metadata
-    but no file on disk, the media is re-downloaded if the current server
-    settings (``scrape_media``, ``max_media_size_mb``) now allow it.
+    When *settings.repair_media* is ``True`` and a cached message has media
+    metadata but no file on disk, the media is re-downloaded if the current
+    settings now allow it.
 
     Yields batches of message dictionaries ready for API response.
     """
@@ -370,14 +364,15 @@ async def stream_messages_with_cache(
         segments = build_timeline(covered, gaps)
 
     # Pre-compute max bytes for repair comparison
-    if max_media_size_mb is not None:
+    if settings.max_media_size_mb is not None:
         try:
-            _repair_max_bytes = int(float(max_media_size_mb) * 1024 * 1024)
+            _repair_max_bytes = int(float(settings.max_media_size_mb) * 1024 * 1024)
         except (TypeError, ValueError):
             _repair_max_bytes = None
     else:
         _repair_max_bytes = None  # no limit
 
+    retrieve_messages_batch_size = settings.telegram_batch_size
     # Stream through timeline
     for segment in segments:
         if segment.source == "cache":
@@ -387,7 +382,7 @@ async def stream_messages_with_cache(
                 dialog_id,
                 segment.start,
                 segment.end,
-                batch_size=telegram_batch_size,
+                batch_size=retrieve_messages_batch_size,
             ):
                 for row in batch:
                     # row is already a dict from operations
@@ -405,8 +400,8 @@ async def stream_messages_with_cache(
 
                     # --- Repair skipped media ---
                     if (
-                        repair_media
-                        and scrape_media
+                        settings.repair_media
+                        and settings.download_media
                         and media_info
                         and not media_info.get("file_path")
                     ):
@@ -434,8 +429,7 @@ async def stream_messages_with_cache(
                                         tg_msg,
                                         output_dir=output_dir,
                                         dialog_id=dialog_id,
-                                        max_media_size_mb=max_media_size_mb,
-                                        download_file_types=download_file_types,
+                                        settings=settings,
                                     )
                                     if result.status == "downloaded" and result.path:
                                         operations.update_media_file_path(
@@ -491,12 +485,10 @@ async def stream_messages_with_cache(
                 dialog_id,
                 segment.start,
                 segment.end,
-                min(telegram_batch_size, client_batch_size),
-                scrape_media,
-                max_media_size_mb,
+                retrieve_messages_batch_size,
+                settings,
                 output_dir,
                 force_redownload=force_refresh,
-                download_file_types=download_file_types,
             ):
                 # Convert MessageData to dict
                 for msg in telegram_batch:

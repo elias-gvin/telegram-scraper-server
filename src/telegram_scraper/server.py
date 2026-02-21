@@ -188,7 +188,7 @@ def main(
         host=host,
         port=port,
         settings_path=settings_path,
-        **settings,
+        settings=settings,
     )
 
     # Log configuration
@@ -200,14 +200,15 @@ def main(
     logger.info(f"  Dialogs: {server_config.dialogs_dir.resolve()}")
     logger.info(f"  Sessions: {server_config.sessions_dir.resolve()}")
     logger.info(f"Settings file: {server_config.settings_path}")
-    logger.info(f"Download media: {server_config.download_media}")
-    if server_config.download_media:
-        if server_config.max_media_size_mb:
-            logger.info(f"Max media size: {server_config.max_media_size_mb} MB")
+    s = server_config.settings
+    logger.info(f"Download media: {s.download_media}")
+    if s.download_media:
+        if s.max_media_size_mb:
+            logger.info(f"Max media size: {s.max_media_size_mb} MB")
         else:
             logger.info("Max media size: unlimited")
-    logger.info(f"Telegram batch size: {server_config.telegram_batch_size}")
-    logger.info(f"Repair media: {server_config.repair_media}")
+    logger.info(f"Telegram batch size: {s.telegram_batch_size}")
+    logger.info(f"Repair media: {s.repair_media}")
     logger.info(f"Server: {server_config.host}:{server_config.port}")
     logger.info("=" * 60)
 
