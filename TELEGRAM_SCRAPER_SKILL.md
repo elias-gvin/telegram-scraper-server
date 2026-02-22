@@ -130,7 +130,7 @@ All endpoints require the `X-Telegram-Username` header with the session name use
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `q` or `query` | string | — | Search query on dialog title (omit for all); both parameter names accepted |
+| `q` | string | — | Search query on dialog title (omit for all) |
 | `match` | enum | `fuzzy` | `fuzzy` (scored) or `exact` (substring) |
 | `min_score` | float | `0.8` | Fuzzy score threshold (0.0–1.0) |
 | `type` | enum[] | — | `user`, `group`, `supergroup`, `channel`, `bot`, `saved`, `me`. Repeat for multiple: `?type=group&type=supergroup` |
@@ -225,7 +225,7 @@ Uses Telegram's `messages.search` — works on any dialog, even if not previousl
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `q` or `query` | string | *required* | Search query (word or phrase to find); both parameter names accepted |
+| `q` | string | *required* | Search query (word or phrase to find) |
 | `start_date` | string | — | Upper bound — messages before this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
 | `end_date` | string | — | Lower bound — messages after this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
 | `from_user` | int | — | Only messages sent by this user ID |
@@ -239,7 +239,7 @@ Uses Telegram's `messages.searchGlobal` — searches across all your chats at on
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `q` or `query` | string | *required* | Search query (word or phrase to find); both parameter names accepted |
+| `q` | string | *required* | Search query (word or phrase to find) |
 | `start_date` | string | — | Upper bound — messages before this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
 | `end_date` | string | — | Lower bound — messages after this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
 | `limit` | int | `50` | Maximum results (1–500) |
@@ -415,7 +415,7 @@ cp "$HOST_PATH" ./my_file.jpg
 | `max_media_size_mb` | `20` | Max media size in MB. `0` or `null` = no limit. **Media over 20MB is skipped by default.** |
 | `telegram_batch_size` | `100` | Batch size for Telegram API downloads (must be > 0) |
 | `repair_media` | `true` | Re-download media previously skipped due to size limits or disabled downloads |
-| `download_file_types` | object (see below) | Per-type download toggles: `photos`, `videos`, `voice_messages`, `video_messages`, `stickers`, `gifs`, `files`. Defaults: all `true` except `videos: false`. |
+| `download_file_types` | object (see below) | Per-type download toggles: `photos`, `videos`, `voice_messages`, `video_messages`, `stickers`, `gifs`, `files`. Defaults: all `true`. |
 
 **Update example:**
 
