@@ -348,7 +348,7 @@ data: {"messages": [{...}, {...}]}
   "post_author": null,
   "is_forwarded": 0,
   "forwarded_from_channel_id": null,
-  "media_type": "MessageMediaPhoto",
+  "media_type": "photos",
   "media_uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "media_original_filename": null,
   "media_size": 2458624
@@ -357,7 +357,7 @@ data: {"messages": [{...}, {...}]}
 
 Key details:
 - `date` / `edit_date` format: `YYYY-MM-DD HH:MM:SS` (UTC), not ISO 8601
-- `media_type` uses Telegram class names: `MessageMediaPhoto`, `MessageMediaDocument`, `MessageMediaWebPage`, etc.
+- `media_type` is one of: `photos`, `videos`, `voice_messages`, `video_messages`, `stickers`, `gifs`, `files` (or `null` if no media)
 - `media_uuid` is `null` when no media; use it with the files endpoint to download
 - `media_original_filename` is `null` for photos (only documents/audio carry filenames)
 - `is_forwarded`: `0` or `1` (integer, not boolean)

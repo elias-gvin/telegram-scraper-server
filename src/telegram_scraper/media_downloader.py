@@ -23,7 +23,7 @@ from .config import MediaCategory, DownloadFileTypes, RuntimeSettings
 class MediaMetadata:
     """Telegram media metadata extracted without downloading."""
 
-    media_type: str  # e.g. "MessageMediaPhoto"
+    media_type: str  # MediaCategory value: "photos", "videos", "stickers", etc.
     file_size: int  # Telegram-reported size in bytes
     original_filename: Optional[str] = None  # e.g. "doc.mp4"; None for photos
 
@@ -43,12 +43,9 @@ def get_media_metadata(message) -> Optional[MediaMetadata]:
 
     Returns None if the message has no downloadable media.
     """
-    if not message.media:
+    category = classify_media_category(message)
+    if category is None:
         return None
-    if isinstance(message.media, MessageMediaWebPage):
-        return None
-
-    media_type = message.media.__class__.__name__
 
     # Get size from Telegram metadata
     msg_file = getattr(message, "file", None)
@@ -57,14 +54,10 @@ def get_media_metadata(message) -> Optional[MediaMetadata]:
         doc = getattr(getattr(message, "media", None), "document", None)
         size_bytes = getattr(doc, "size", None)
 
-    # Photos and some media types don't carry a filename; documents usually do.
-    if not isinstance(message.media, (MessageMediaPhoto, MessageMediaDocument)):
-        return None
-
     original_filename = getattr(getattr(message, "file", None), "name", None)
 
     return MediaMetadata(
-        media_type=media_type,
+        media_type=category,
         file_size=size_bytes or 0,
         original_filename=original_filename,  # None for photos
     )

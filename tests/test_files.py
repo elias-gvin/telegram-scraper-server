@@ -58,7 +58,7 @@ def media_uuid(server_config):
             dialog_id=DIALOG_ID,
             message_id=1,
             file_size=fake_file.stat().st_size,
-            media_type="MessageMediaPhoto",
+            media_type="photos",
             original_filename=None,  # Photos don't have original filenames
             file_path=str(fake_file),
         )

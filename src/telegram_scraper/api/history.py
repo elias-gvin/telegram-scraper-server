@@ -13,7 +13,7 @@ from telethon.errors import FloodWaitError
 
 from .auth_utils import get_telegram_client
 from .deps import get_config
-from ..config import ServerConfig
+from ..config import MediaCategory, ServerConfig
 from ..database import operations
 from ..database import (
     get_engine,
@@ -43,7 +43,7 @@ class MessageResponse(BaseModel):
     post_author: str | None = None
     is_forwarded: int
     forwarded_from_channel_id: int | None = None
-    media_type: str | None = None
+    media_type: MediaCategory | None = None
     media_uuid: str | None = None
     media_size: int | None = None
     media_original_filename: str | None = None

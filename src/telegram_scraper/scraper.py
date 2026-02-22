@@ -467,9 +467,7 @@ async def stream_messages_with_cache(
 
                     # Build media fields for response
                     if media_info:
-                        msg_dict["media_type"] = (
-                            media_info.get("media_type") or "unknown"
-                        )
+                        msg_dict["media_type"] = media_info.get("media_type")
                         msg_dict["media_uuid"] = media_info.get("uuid")
                         msg_dict["media_size"] = media_info.get("file_size")
                         msg_dict["media_original_filename"] = media_info.get(

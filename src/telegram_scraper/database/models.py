@@ -44,7 +44,7 @@ class MediaFile(SQLModel, table=True):
 
     # Always populated (from Telegram metadata, no download needed)
     file_size: int  # Telegram-reported size in bytes
-    media_type: str  # Telegram type: MessageMediaPhoto, MessageMediaDocument, etc.
+    media_type: str  # MediaCategory value: "photos", "videos", "stickers", etc.
 
     # Original filename from Telegram (NULL for media types that don't carry one, e.g. photos)
     original_filename: Optional[str] = None

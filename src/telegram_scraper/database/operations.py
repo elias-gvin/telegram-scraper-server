@@ -206,7 +206,7 @@ def store_media_with_uuid(
         dialog_id: Dialog ID (used to find the message)
         message_id: Message ID (used to find the message)
         file_size: Telegram-reported size in bytes
-        media_type: Telegram media type (e.g., 'MessageMediaPhoto')
+        media_type: MediaCategory value (e.g., 'photos', 'videos')
         original_filename: Original filename from Telegram (None for photos)
         file_path: Full file path on disk, or None if not downloaded
 
@@ -228,7 +228,7 @@ def store_media_with_uuid(
         if existing:
             existing.original_filename = original_filename
             existing.file_size = file_size
-            existing.media_type = media_type or "unknown"
+            existing.media_type = media_type
             if file_path is not None:
                 existing.file_path = file_path
             session.commit()
@@ -240,7 +240,7 @@ def store_media_with_uuid(
     media_file = MediaFile(
         uuid=media_uuid,
         file_size=file_size,
-        media_type=media_type or "unknown",
+        media_type=media_type,
         original_filename=original_filename,
         file_path=file_path,
     )

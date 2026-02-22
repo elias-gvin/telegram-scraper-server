@@ -43,7 +43,7 @@ class MessageData:
     forwarded_from_channel_id: Optional[int] = None
 
     # Media (metadata always filled when media exists; path only when downloaded)
-    media_type: Optional[str] = None  # Telegram class name
+    media_type: Optional[str] = None  # MediaCategory value: "photos", "videos", etc.
     media_uuid: Optional[str] = None  # Generated UUID
     media_original_filename: Optional[str] = (
         None  # Original filename from Telegram (None for photos)
