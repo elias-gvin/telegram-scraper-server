@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Query, Depends, HTTPException
 from typing import Annotated, Optional, List
-from pydantic import BaseModel, AliasChoices
+from pydantic import BaseModel
 from enum import Enum
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
@@ -135,6 +135,16 @@ def _search_score(title: str, query: str) -> float:
     return SequenceMatcher(None, t, q).ratio()
 
 
+def _dialog_title(dialog) -> str:
+    """Return the display title for a dialog (same logic as _dialog_to_info)."""
+    entity = dialog.entity
+    if dialog.is_user:
+        first = getattr(entity, "first_name", "") or ""
+        last = getattr(entity, "last_name", "") or ""
+        return f"{first} {last}".strip() or str(entity.id)
+    return getattr(entity, "title", "") or str(entity.id)
+
+
 def _classify_dialog(dialog, my_id: int) -> DialogType:
     """Classify a Telethon Dialog into a DialogType."""
     entity = dialog.entity
@@ -250,8 +260,8 @@ async def search_dialogs(
     query: Annotated[
         Optional[str],
         Query(
+            alias="q",
             description="Search query on dialog title. Omit to return all.",
-            validation_alias=AliasChoices("q", "query"),
         ),
     ] = None,
     match: Annotated[
@@ -434,7 +444,7 @@ async def search_dialogs(
             # --- Filter: text search ---
             score = 0.0
             if query:
-                title = dialog.title or ""
+                title = _dialog_title(dialog)
                 if match == MatchMode.fuzzy:
                     score = _search_score(title, query)
                     if score < min_score:

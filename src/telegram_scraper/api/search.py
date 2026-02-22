@@ -7,7 +7,7 @@ Uses Telegram's native search API:
 
 from fastapi import APIRouter, Query, Path, Depends, HTTPException
 from typing import Annotated, Optional, List
-from pydantic import BaseModel, AliasChoices
+from pydantic import BaseModel
 import logging
 
 from telethon import TelegramClient
@@ -165,9 +165,9 @@ async def search_messages_in_dialog(
     query: Annotated[
         str,
         Query(
+            alias="q",
             min_length=1,
             description="Search query (word or phrase to find)",
-            validation_alias=AliasChoices("q", "query"),
         ),
     ],
     start_date: Annotated[
@@ -278,9 +278,9 @@ async def search_messages_global(
     query: Annotated[
         str,
         Query(
+            alias="q",
             min_length=1,
             description="Search query (word or phrase to find)",
-            validation_alias=AliasChoices("q", "query"),
         ),
     ],
     start_date: Annotated[
