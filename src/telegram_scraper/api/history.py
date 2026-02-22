@@ -28,30 +28,25 @@ router = APIRouter(tags=["history"])
 logger = logging.getLogger(__name__)
 
 
-class MediaInfo(BaseModel):
-    """Media information for a message."""
-
-    type: str
-    uuid: str
-    original_filename: str | None
-    size: int
-
-
 class MessageResponse(BaseModel):
-    """Message data response model."""
+    """Message data response model (flat shape matching scraper output)."""
 
     message_id: int
     date: str
+    edit_date: str | None = None
     sender_id: int
-    first_name: str | None
-    last_name: str | None
-    username: str | None
+    first_name: str | None = None
+    last_name: str | None = None
+    username: str | None = None
     message: str
-    media: MediaInfo | None
-    reply_to: int | None
-    post_author: str | None
+    reply_to: int | None = None
+    post_author: str | None = None
     is_forwarded: int
-    forwarded_from_channel_id: int | None
+    forwarded_from_channel_id: int | None = None
+    media_type: str | None = None
+    media_uuid: str | None = None
+    media_size: int | None = None
+    media_original_filename: str | None = None
 
 
 class MessagesListResponse(BaseModel):
@@ -78,6 +73,14 @@ def parse_date(date_str: str) -> datetime:
 
 @router.get(
     "/history/{dialog_id}",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "model": MessagesListResponse,
+            "description": "SSE stream. Each `data:` event contains a batch of messages.",
+            "content": {"text/event-stream": {}},
+        }
+    },
     summary="Get message history",
     description="""
     Stream message history with smart caching via Server-Sent Events (SSE).

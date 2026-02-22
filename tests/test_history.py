@@ -6,6 +6,7 @@ import json
 import pytest
 from datetime import datetime, timezone, timedelta
 
+from telegram_scraper.api.history import MessageResponse
 from telegram_scraper.database import dialog_db_paths, get_session
 from telegram_scraper.database.models import Message
 
@@ -91,17 +92,14 @@ class TestHistoryBasic:
 
     @pytest.mark.asyncio
     async def test_message_shape(self, client):
-        """Each message dict has the expected keys."""
+        """Each message dict matches MessageResponse schema."""
         resp = await client.get(
             f"/api/v3/history/{DIALOG_ID}",
             params={"start_date": "2025-01-01", "end_date": "2025-01-02"},
         )
         messages = parse_sse(resp.text)
         for m in messages:
-            assert "message_id" in m
-            assert "date" in m
-            assert "message" in m
-            assert "sender_id" in m
+            MessageResponse(**m)
 
     @pytest.mark.asyncio
     async def test_date_range_filters_messages(self, client):
