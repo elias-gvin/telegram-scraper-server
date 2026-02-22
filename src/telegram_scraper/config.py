@@ -175,6 +175,7 @@ def resolve_settings_file(
       If missing, create one with defaults. Return data_dir/settings.yaml.
     """
     canonical = data_dir / "settings.yaml"
+    data_dir.mkdir(parents=True, exist_ok=True)
 
     if cli_settings_path is not None:
         # User provided an explicit settings file
