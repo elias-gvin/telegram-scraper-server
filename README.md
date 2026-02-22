@@ -239,7 +239,7 @@ GET /api/v3/search/dialogs?query={query}
 Header: X-Telegram-Username: your_username
 ```
 
-Search for channels, groups, and users.
+Search for channels, groups, and users. Use `query` or `q` for the search term (e.g. `?q=telegram` or `?query=telegram`).
 
 ### 2. Message History
 
@@ -260,7 +260,7 @@ GET /api/v3/search/messages/{dialog_id}?q={query}
 Header: X-Telegram-Username: your_username
 ```
 
-Search for messages containing specific words or phrases. Searches Telegram directly — no pre-caching required.
+Search for messages containing specific words or phrases. Use `q` or `query` for the search term. Searches Telegram directly — no pre-caching required.
 - Global search: omit `dialog_id` to search across all chats (`messages.searchGlobal`)
 - Per-dialog search: include `dialog_id` to search within a specific chat (`messages.search`)
 - Optional filters: `start_date`, `end_date`, `from_user` (per-dialog only), `limit`

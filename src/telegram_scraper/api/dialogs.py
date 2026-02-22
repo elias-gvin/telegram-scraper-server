@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Query, Depends, HTTPException
 from typing import Annotated, Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, AliasChoices
 from enum import Enum
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
@@ -247,9 +247,12 @@ Examples:
 """,
 )
 async def search_dialogs(
-    q: Annotated[
+    query: Annotated[
         Optional[str],
-        Query(description="Search query on dialog title. Omit to return all."),
+        Query(
+            description="Search query on dialog title. Omit to return all.",
+            validation_alias=AliasChoices("q", "query"),
+        ),
     ] = None,
     match: Annotated[
         MatchMode,
@@ -404,7 +407,7 @@ async def search_dialogs(
         my_id = me.id
 
         # Determine whether to sort by score (when fuzzy search is active)
-        sort_by_score = q is not None and match == MatchMode.fuzzy
+        sort_by_score = query is not None and match == MatchMode.fuzzy
 
         scored_results: list[tuple[float, DialogInfo, object]] = []
 
@@ -430,14 +433,14 @@ async def search_dialogs(
 
             # --- Filter: text search ---
             score = 0.0
-            if q:
+            if query:
                 title = dialog.title or ""
                 if match == MatchMode.fuzzy:
-                    score = _search_score(title, q)
+                    score = _search_score(title, query)
                     if score < min_score:
                         continue
                 else:  # exact
-                    if q.lower() not in title.lower():
+                    if query.lower() not in title.lower():
                         continue
 
             # --- Filter: message count ---

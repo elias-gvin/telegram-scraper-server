@@ -7,7 +7,7 @@ Uses Telegram's native search API:
 
 from fastapi import APIRouter, Query, Path, Depends, HTTPException
 from typing import Annotated, Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, AliasChoices
 import logging
 
 from telethon import TelegramClient
@@ -162,9 +162,13 @@ Examples:
 )
 async def search_messages_in_dialog(
     dialog_id: Annotated[int, Path(description="Dialog ID to search within")],
-    q: Annotated[
+    query: Annotated[
         str,
-        Query(min_length=1, description="Search query (word or phrase to find)"),
+        Query(
+            min_length=1,
+            description="Search query (word or phrase to find)",
+            validation_alias=AliasChoices("q", "query"),
+        ),
     ],
     start_date: Annotated[
         Optional[str],
@@ -208,7 +212,7 @@ async def search_messages_in_dialog(
         # Build iter_messages kwargs
         kwargs = {
             "entity": dialog_id,
-            "search": q,
+            "search": query,
             "limit": limit,
         }
         if offset_date:
@@ -230,7 +234,7 @@ async def search_messages_in_dialog(
                 total += 1
 
         return SearchMessagesResponse(
-            query=q,
+            query=query,
             total=total,
             limit=limit,
             results=results,
@@ -271,9 +275,13 @@ Examples:
 """,
 )
 async def search_messages_global(
-    q: Annotated[
+    query: Annotated[
         str,
-        Query(min_length=1, description="Search query (word or phrase to find)"),
+        Query(
+            min_length=1,
+            description="Search query (word or phrase to find)",
+            validation_alias=AliasChoices("q", "query"),
+        ),
     ],
     start_date: Annotated[
         Optional[str],
@@ -313,7 +321,7 @@ async def search_messages_global(
         # entity=None triggers messages.searchGlobal
         kwargs = {
             "entity": None,
-            "search": q,
+            "search": query,
             "limit": limit,
         }
         if offset_date:
@@ -333,7 +341,7 @@ async def search_messages_global(
                 total += 1
 
         return SearchMessagesResponse(
-            query=q,
+            query=query,
             total=total,
             limit=limit,
             results=results,
