@@ -304,19 +304,24 @@ Always use `curl -N` to enable streaming.
 | `end_date` | string | now | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` |
 | `chunk_size` | int | `100` | Messages per SSE chunk (must be > 0) |
 | `force_refresh` | bool | `false` | Bypass cache and re-download from Telegram |
+| `reverse` | bool | `true` | If `true`, stream oldest-first. If `false`, newest-first. |
 
 Messages are cached in SQLite per dialog. First request downloads from Telegram; subsequent requests serve from cache (only downloading missing date ranges). Use `force_refresh=true` to bypass.
 
 **Examples:**
 
 ```bash
-# All messages
+# All messages (oldest-first, default)
 curl -N -s -H "X-Telegram-Username: $USERNAME" \
   "http://localhost:8000/api/v3/history/-1001234567890"
 
 # Date range with smaller chunks
 curl -N -s -H "X-Telegram-Username: $USERNAME" \
   "http://localhost:8000/api/v3/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&chunk_size=50"
+
+# Newest-first
+curl -N -s -H "X-Telegram-Username: $USERNAME" \
+  "http://localhost:8000/api/v3/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&reverse=false"
 ```
 
 **SSE format** — each event contains a `messages` array:

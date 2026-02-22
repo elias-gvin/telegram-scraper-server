@@ -251,6 +251,7 @@ Header: X-Telegram-Username: your_username
 Stream message history with smart caching:
 - `chunk_size=250` - Stream in chunks (Server-Sent Events)
 - `force_refresh=true` - Bypass cache and re-download
+- `reverse=true` (default) - Oldest-first; `reverse=false` - Newest-first
 
 ### 3. Search Messages
 

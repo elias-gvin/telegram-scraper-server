@@ -202,3 +202,54 @@ class TestHistoryCaching:
         )
         msgs = parse_sse(resp.text)
         assert len(msgs) == 0
+
+
+class TestHistoryReverse:
+    """GET /api/v3/history/{dialog_id} — reverse parameter (ordering)."""
+
+    @pytest.mark.asyncio
+    async def test_reverse_true_returns_oldest_first(self, client):
+        """Explicit reverse=true returns messages in ascending date order."""
+        resp = await client.get(
+            f"/api/v3/history/{DIALOG_ID}",
+            params={
+                "start_date": "2025-01-01",
+                "end_date": "2025-01-02",
+                "reverse": "true",
+            },
+        )
+        assert resp.status_code == 200
+        messages = parse_sse(resp.text)
+        assert len(messages) >= 1
+        dates = [m["date"] for m in messages]
+        assert dates == sorted(dates)
+
+    @pytest.mark.asyncio
+    async def test_reverse_false_returns_newest_first(self, client):
+        """reverse=false returns messages in descending date order."""
+        resp = await client.get(
+            f"/api/v3/history/{DIALOG_ID}",
+            params={
+                "start_date": "2025-01-01",
+                "end_date": "2025-01-02",
+                "reverse": "false",
+            },
+        )
+        assert resp.status_code == 200
+        messages = parse_sse(resp.text)
+        assert len(messages) >= 1
+        dates = [m["date"] for m in messages]
+        assert dates == sorted(dates, reverse=True)
+
+    @pytest.mark.asyncio
+    async def test_reverse_default_is_true(self, client):
+        """Omitting reverse param defaults to oldest-first (same as reverse=true)."""
+        resp = await client.get(
+            f"/api/v3/history/{DIALOG_ID}",
+            params={"start_date": "2025-01-01", "end_date": "2025-01-02"},
+        )
+        assert resp.status_code == 200
+        messages = parse_sse(resp.text)
+        assert len(messages) >= 1
+        dates = [m["date"] for m in messages]
+        assert dates == sorted(dates)

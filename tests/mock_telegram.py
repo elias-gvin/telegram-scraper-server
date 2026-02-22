@@ -222,6 +222,8 @@ class MockTelegramClient:
         for msg in sorted_msgs:
             if offset_date and reverse and msg.date < offset_date:
                 continue
+            if offset_date and not reverse and msg.date > offset_date:
+                continue
             yield msg
 
     async def __call__(self, request):

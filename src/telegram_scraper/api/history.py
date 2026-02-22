@@ -118,6 +118,12 @@ async def get_history(
     force_refresh: Annotated[
         bool, Query(description="Force re-download even if cached")
     ] = False,
+    reverse: Annotated[
+        bool,
+        Query(
+            description="If True, return messages oldest-first. If False, newest-first."
+        ),
+    ] = True,
     client: TelegramClient = Depends(get_telegram_client),
     config: ServerConfig = Depends(get_config),
 ):
@@ -184,6 +190,7 @@ async def get_history(
                         client_batch_size=batch_size,
                         force_refresh=force_refresh,
                         output_dir=config.dialogs_dir,
+                        reverse=reverse,
                     ):
                         yield f"data: {json.dumps({'messages': batch})}\n\n"
                 finally:

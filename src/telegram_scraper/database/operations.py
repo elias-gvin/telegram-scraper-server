@@ -335,6 +335,7 @@ def iter_messages_in_range(
     start_date: datetime,
     end_date: datetime,
     batch_size: int = 100,
+    reverse: bool = True,
 ):
     """
     Iterate over messages in a date range in batches.
@@ -353,7 +354,7 @@ def iter_messages_in_range(
                 Message.date >= start_date.strftime("%Y-%m-%d %H:%M:%S"),
                 Message.date <= end_date.strftime("%Y-%m-%d %H:%M:%S"),
             )
-            .order_by(Message.date)
+            .order_by(Message.date if reverse else Message.date.desc())
             .offset(offset)
             .limit(batch_size)
         )

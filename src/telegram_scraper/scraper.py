@@ -134,6 +134,7 @@ async def download_from_telegram_batched(
     settings: RuntimeSettings,
     output_dir: Path,
     force_redownload: bool = False,
+    reverse: bool = True,
 ) -> AsyncIterator[List[MessageData]]:
     """
     Download messages from Telegram in batches and save to DB.
@@ -152,10 +153,15 @@ async def download_from_telegram_batched(
     if end_date.tzinfo is None:
         end_date = end_date.replace(tzinfo=timezone.utc)
 
-    async for message in client.iter_messages(
-        entity, offset_date=start_date, reverse=True
-    ):
-        if message.date > end_date:
+    if reverse:
+        iter_kwargs = {"offset_date": start_date, "reverse": True}
+    else:
+        iter_kwargs = {"offset_date": end_date, "reverse": False}
+
+    async for message in client.iter_messages(entity, **iter_kwargs):
+        if reverse and message.date > end_date:
+            break
+        if not reverse and message.date < start_date:
             break
 
         try:
@@ -326,6 +332,7 @@ async def stream_messages_with_cache(
     client_batch_size: int,
     force_refresh: bool,
     output_dir: Path,
+    reverse: bool = True,
 ) -> AsyncIterator[List[dict]]:
     """
     Stream messages with cache awareness.
@@ -363,6 +370,11 @@ async def stream_messages_with_cache(
         covered = find_covered_range(requested, cached_range)
         segments = build_timeline(covered, gaps)
 
+    # When reverse=False (newest-first), process segments from end_date toward
+    # start_date so that messages stream in descending order.
+    if not reverse:
+        segments.reverse()
+
     # Pre-compute max bytes for repair comparison
     if settings.max_media_size_mb is not None:
         try:
@@ -383,6 +395,7 @@ async def stream_messages_with_cache(
                 segment.start,
                 segment.end,
                 batch_size=retrieve_messages_batch_size,
+                reverse=reverse,
             ):
                 for row in batch:
                     # row is already a dict from operations
@@ -489,6 +502,7 @@ async def stream_messages_with_cache(
                 settings,
                 output_dir,
                 force_redownload=force_refresh,
+                reverse=reverse,
             ):
                 # Convert MessageData to dict
                 for msg in telegram_batch:
