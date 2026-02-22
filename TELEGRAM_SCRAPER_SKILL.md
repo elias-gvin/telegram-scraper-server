@@ -134,7 +134,6 @@ All endpoints require the `X-Telegram-Username` header with the session name use
 | `match` | enum | `fuzzy` | `fuzzy` (scored) or `exact` (substring) |
 | `min_score` | float | `0.8` | Fuzzy score threshold (0.0–1.0) |
 | `type` | enum[] | — | `user`, `group`, `supergroup`, `channel`, `bot`, `saved`, `me`. Repeat for multiple: `?type=group&type=supergroup` |
-| `folder` | string/int | — | Folder ID or name (case-insensitive) |
 | `is_archived` | bool | — | Filter by archive status |
 | `min_messages` | int | — | Minimum message count |
 | `max_messages` | int | — | Maximum message count |
@@ -199,17 +198,37 @@ curl -s -H "X-Telegram-Username: $USERNAME" \
 
 `GET /api/v3/folders`
 
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `include_dialogs` | bool | `false` | If `true`, each folder includes a `dialogs` array (id + title) for explicitly included peers only |
+
 ```bash
+# Folders only
 curl -s -H "X-Telegram-Username: $USERNAME" \
   "http://localhost:8000/api/v3/folders"
+
+# Folders with dialog list (id, title) per folder
+curl -s -H "X-Telegram-Username: $USERNAME" \
+  "http://localhost:8000/api/v3/folders?include_dialogs=true"
 ```
 
-**Response:**
+Returns only **custom folders** (built-in All Chats/Archive are excluded). User/channel titles: users use first name + last name; channels/groups use `title`.
+
+**Response (without include_dialogs):**
 
 ```json
 [
-  {"id": 0, "title": "All Chats", "is_default": true},
-  {"id": 1, "title": "Work", "is_default": false}
+  {"id": 2, "title": "Work"},
+  {"id": 3, "title": "Personal"}
+]
+```
+
+**Response (with include_dialogs=true):** each folder includes a `dialogs` array (id + title) for explicitly included peers.
+
+```json
+[
+  {"id": 2, "title": "Work", "dialogs": [{"id": -1001234567890, "title": "Crypto News"}, {"id": 400, "title": "Alice Smith"}]},
+  {"id": 3, "title": "Personal", "dialogs": [...]}
 ]
 ```
 

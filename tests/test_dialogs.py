@@ -14,6 +14,7 @@ from .mock_telegram import (
     FakeDialogFilter,
     FakeDialogFilterTitle,
     FakeDialogFilterDefault,
+    FakeInputPeer,
 )
 
 
@@ -90,11 +91,25 @@ def mock_client():
         ),
     ]
 
-    # Folders
+    # Folders — include_peers link folders to specific dialogs
     folders = [
         FakeDialogFilterDefault(),
-        FakeDialogFilter(id=2, title=FakeDialogFilterTitle("Work")),
-        FakeDialogFilter(id=3, title=FakeDialogFilterTitle("Personal")),
+        FakeDialogFilter(
+            id=2,
+            title=FakeDialogFilterTitle("Work"),
+            include_peers=[
+                FakeInputPeer(channel_id=100),  # Crypto Traders
+                FakeInputPeer(channel_id=200),  # Python Devs
+            ],
+        ),
+        FakeDialogFilter(
+            id=3,
+            title=FakeDialogFilterTitle("Personal"),
+            include_peers=[
+                FakeInputPeer(chat_id=300),  # Family Group
+                FakeInputPeer(user_id=400),  # Alice Smith
+            ],
+        ),
     ]
 
     return MockTelegramClient(
@@ -254,8 +269,8 @@ class TestFolders:
         assert resp.status_code == 200
         folders = resp.json()
         assert isinstance(folders, list)
-        # We set up Work + Personal + Default
-        assert len(folders) == 3
+        # Only custom folders (Work, Personal); built-in Default is excluded
+        assert len(folders) == 2
 
     @pytest.mark.asyncio
     async def test_folder_shape(self, client):
@@ -263,7 +278,6 @@ class TestFolders:
         for f in resp.json():
             assert "id" in f
             assert "title" in f
-            assert "is_default" in f
 
     @pytest.mark.asyncio
     async def test_folder_names(self, client):
@@ -271,6 +285,38 @@ class TestFolders:
         titles = {f["title"] for f in resp.json()}
         assert "Work" in titles
         assert "Personal" in titles
+
+    @pytest.mark.asyncio
+    async def test_folders_without_include_dialogs(self, client):
+        """Default request does not include dialogs field (or null)."""
+        resp = await client.get("/api/v3/folders")
+        assert resp.status_code == 200
+        for f in resp.json():
+            assert "dialogs" not in f or f.get("dialogs") is None
+
+    @pytest.mark.asyncio
+    async def test_folders_with_include_dialogs(self, client):
+        """include_dialogs=true returns dialog refs with correct IDs and titles."""
+        resp = await client.get("/api/v3/folders", params={"include_dialogs": "true"})
+        assert resp.status_code == 200
+        folders = resp.json()
+        work = next(f for f in folders if f["title"] == "Work")
+        assert "dialogs" in work
+        ids = {d["id"] for d in work["dialogs"]}
+        titles = {d["title"] for d in work["dialogs"]}
+        assert ids == {100, 200}
+        assert titles == {"Crypto Traders", "Python Devs"}
+        personal = next(f for f in folders if f["title"] == "Personal")
+        assert {d["id"] for d in personal["dialogs"]} == {300, 400}
+
+    @pytest.mark.asyncio
+    async def test_folder_dialog_titles_use_names_for_users(self, client):
+        """User entities get first_name + last_name as title, not entity title."""
+        resp = await client.get("/api/v3/folders", params={"include_dialogs": "true"})
+        assert resp.status_code == 200
+        personal = next(f for f in resp.json() if f["title"] == "Personal")
+        alice = next(d for d in personal["dialogs"] if d["id"] == 400)
+        assert alice["title"] == "Alice Smith"
 
 
 # ---------------------------------------------------------------------------

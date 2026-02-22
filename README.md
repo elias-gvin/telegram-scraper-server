@@ -239,9 +239,19 @@ GET /api/v3/search/dialogs?q={query}
 Header: X-Telegram-Username: your_username
 ```
 
-Search for channels, groups, and users. Use the `q` query parameter for the search term (e.g. `?q=telegram`).
+Search for channels, groups, and users. Use the `q` query parameter for the search term (e.g. `?q=telegram`). Optional filters: `type`, `is_archived`, `min_participants`, `max_participants`, `last_message_after`, `last_message_before`, `limit`, `offset`, and more. See `/docs` for full parameters.
 
-### 2. Message History
+### 2. List Folders
+
+```http
+GET /api/v3/folders
+GET /api/v3/folders?include_dialogs=true
+Header: X-Telegram-Username: your_username
+```
+
+List custom Telegram folders only (built-in All Chats/Archive are excluded). Use `include_dialogs=true` to include each folder’s explicitly added dialogs (id and title). Useful to get dialog IDs in a folder, then use search/history with those IDs.
+
+### 3. Message History
 
 ```http
 GET /api/v3/history/{channel_id}?start_date={date}&end_date={date}&chunk_size={size}
@@ -253,7 +263,7 @@ Stream message history with smart caching:
 - `force_refresh=true` - Bypass cache and re-download
 - `reverse=true` (default) - Oldest-first; `reverse=false` - Newest-first
 
-### 3. Search Messages
+### 4. Search Messages
 
 ```http
 GET /api/v3/search/messages?q={query}
@@ -266,7 +276,7 @@ Search for messages containing specific words or phrases. Use the `q` query para
 - Per-dialog search: include `dialog_id` to search within a specific chat (`messages.search`)
 - Optional filters: `start_date`, `end_date`, `from_user` (per-dialog only), `limit`
 
-### 4. Media Files
+### 5. Media Files
 
 ```http
 GET /api/v3/files/{uuid}
@@ -275,7 +285,7 @@ Header: X-Telegram-Username: your_username
 
 Download media file by UUID (provided in message response).
 
-### 5. Settings
+### 6. Settings
 
 ```http
 GET /api/v3/settings

@@ -95,12 +95,19 @@ class DialogSearchResponse(BaseModel):
     results: List[DialogInfo]
 
 
-class FolderInfo(BaseModel):
-    """Telegram folder information."""
+class FolderDialogRef(BaseModel):
+    """Dialog reference (id + title) for folder contents."""
 
     id: int
     title: str
-    is_default: bool = False
+
+
+class FolderInfo(BaseModel):
+    """Telegram folder information (custom folders only; built-ins are excluded)."""
+
+    id: int
+    title: str
+    dialogs: Optional[List[FolderDialogRef]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -135,14 +142,21 @@ def _search_score(title: str, query: str) -> float:
     return SequenceMatcher(None, t, q).ratio()
 
 
-def _dialog_title(dialog) -> str:
-    """Return the display title for a dialog (same logic as _dialog_to_info)."""
-    entity = dialog.entity
-    if dialog.is_user:
+def _entity_title(entity) -> str:
+    """Return display title for an entity (user: first_name + last_name; channel/group: title)."""
+    if (
+        getattr(entity, "first_name", None) is not None
+        or getattr(entity, "last_name", None) is not None
+    ):
         first = getattr(entity, "first_name", "") or ""
         last = getattr(entity, "last_name", "") or ""
         return f"{first} {last}".strip() or str(entity.id)
     return getattr(entity, "title", "") or str(entity.id)
+
+
+def _dialog_title(dialog) -> str:
+    """Return the display title for a dialog."""
+    return _entity_title(dialog.entity)
 
 
 def _classify_dialog(dialog, my_id: int) -> DialogType:
@@ -165,14 +179,7 @@ def _classify_dialog(dialog, my_id: int) -> DialogType:
 def _dialog_to_info(dialog, my_id: int) -> DialogInfo:
     """Convert a Telethon Dialog to a DialogInfo response model."""
     entity = dialog.entity
-
-    # Human-readable title
-    if dialog.is_user:
-        first = getattr(entity, "first_name", "") or ""
-        last = getattr(entity, "last_name", "") or ""
-        title = f"{first} {last}".strip() or str(entity.id)
-    else:
-        title = getattr(entity, "title", "") or str(entity.id)
+    title = _entity_title(entity)
 
     # Last message metadata
     last_message_date = dialog.date.isoformat() if dialog.date else None
@@ -202,6 +209,15 @@ def _dialog_to_info(dialog, my_id: int) -> DialogInfo:
         last_message_preview=last_message_preview,
         created_date=created_date,
     )
+
+
+def _extract_peer_id(peer) -> int | None:
+    """Extract the numeric ID from a Telethon InputPeer object."""
+    for attr in ("user_id", "chat_id", "channel_id"):
+        pid = getattr(peer, attr, None)
+        if pid is not None:
+            return pid
+    return None
 
 
 def _sort_key(d: DialogInfo, field: SortField):
@@ -243,16 +259,11 @@ All parameters are optional. Omit everything to list all dialogs.
 Repeat the parameter for multiple types: `?type=group&type=supergroup`.
 Both `saved` and `me` refer to your Saved Messages dialog.
 
-**Folder filter** (`folder`):
-Pass a folder ID (int) or folder name (string, case-insensitive).
-Use `GET /api/v1/folders` to discover available folders.
-
 Examples:
 - `/api/v1/search/dialogs` -- all dialogs
 - `/api/v1/search/dialogs?q=crypto&min_score=0.6`
 - `/api/v1/search/dialogs?type=group&type=supergroup`
 - `/api/v1/search/dialogs?min_messages=100&last_message_after=2024-01-01`
-- `/api/v1/search/dialogs?folder=Work&is_archived=false`
 - `/api/v1/search/dialogs?type=saved` or `?type=me`
 """,
 )
@@ -279,13 +290,6 @@ async def search_dialogs(
     type: Annotated[
         Optional[List[DialogType]],
         Query(description="Filter by dialog type(s). Repeat for multiple."),
-    ] = None,
-    folder: Annotated[
-        Optional[str],
-        Query(
-            description="Folder ID (int) or folder name (case-insensitive, exact match). "
-            "Use GET /api/v1/folders to list available folders.",
-        ),
     ] = None,
     is_archived: Annotated[
         Optional[bool],
@@ -382,36 +386,6 @@ async def search_dialogs(
     if type:
         type_set = {DialogType.saved if t == DialogType.me else t for t in type}
 
-    # --- Resolve folder param (name → ID) ---
-    folder_id: int | None = None
-    if folder is not None:
-        try:
-            folder_id = int(folder)
-        except ValueError:
-            # Resolve by name
-            try:
-                result = await client(GetDialogFiltersRequest())
-                for f in result.filters:
-                    f_title_obj = getattr(f, "title", None)
-                    # title can be a TextWithEntities object or None
-                    f_title = (
-                        getattr(f_title_obj, "text", None) if f_title_obj else None
-                    )
-                    if f_title and f_title.lower() == folder.lower():
-                        folder_id = f.id
-                        break
-                if folder_id is None:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Folder '{folder}' not found. Use GET /api/v1/folders to list available folders.",
-                    )
-            except FloodWaitError as e:
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Telegram rate limit exceeded. Retry after {e.seconds} seconds.",
-                    headers={"Retry-After": str(e.seconds)},
-                )
-
     try:
         me = await client.get_me()
         my_id = me.id
@@ -421,11 +395,7 @@ async def search_dialogs(
 
         scored_results: list[tuple[float, DialogInfo, object]] = []
 
-        iter_kwargs = {}
-        if folder_id is not None:
-            iter_kwargs["folder"] = folder_id
-
-        async for dialog in client.iter_dialogs(**iter_kwargs):
+        async for dialog in client.iter_dialogs():
             # Always skip Telegram Service Notifications
             if dialog.id == 777000:
                 continue
@@ -567,10 +537,19 @@ async def search_dialogs(
 @router.get(
     "/folders",
     response_model=List[FolderInfo],
-    summary="List all Telegram folders",
-    description="Returns all Telegram folders (built-in and custom) for the authenticated user.",
+    response_model_exclude_none=True,
+    summary="List custom Telegram folders",
+    description="Returns user-created folders only (built-in All Chats/Archive and imported shared folders excluded). "
+    "Use include_dialogs=true to list explicitly included dialogs (id + title) from include_peers and pinned_peers. "
+    "Folders that use only category filters (e.g. Contacts) with no explicit peers have an empty dialogs list.",
 )
 async def list_folders(
+    include_dialogs: Annotated[
+        bool,
+        Query(
+            description="If true, resolve and include dialog list (id, title) for each folder from include_peers and pinned_peers.",
+        ),
+    ] = False,
     client: TelegramClient = Depends(get_telegram_client),
 ) -> List[FolderInfo]:
     """
@@ -585,27 +564,55 @@ async def list_folders(
         for f in result.filters:
             f_id = getattr(f, "id", None)
 
-            if f_id is None:
-                # DialogFilterDefault has no id — represent it as the "All Chats" default
-                folders.append(FolderInfo(id=0, title="All Chats", is_default=True))
+            # Skip built-in: DialogFilterDefault (no id) and any filter with id < 2
+            if f_id is None or f_id < 2:
                 continue
+            # # Skip imported shared folders (DialogFilterChatlist); return only user-created (DialogFilter)
+            # if type(f).__name__ == "DialogFilterChatlist":
+            #     continue
 
             # title is a TextWithEntities object on DialogFilter / DialogFilterChatlist
             f_title_obj = getattr(f, "title", None)
             f_title = getattr(f_title_obj, "text", None) if f_title_obj else None
+            title = f_title or f"Folder {f_id}"
 
-            # IDs 0 and 1 are built-in (All Chats / Archive)
-            is_default = f_id in (0, 1)
+            dialogs: Optional[List[FolderDialogRef]] = None
+            if include_dialogs:
+                peers_by_id: dict[int, object] = {}
+                for peer in (getattr(f, "include_peers", None) or []) + (
+                    getattr(f, "pinned_peers", None) or []
+                ):
+                    pid = _extract_peer_id(peer)
+                    if pid is not None and pid not in peers_by_id:
+                        peers_by_id[pid] = peer
 
-            title = f_title or (
-                "All Chats"
-                if f_id == 0
-                else "Archive"
-                if f_id == 1
-                else f"Folder {f_id}"
-            )
+                if not peers_by_id:
+                    logger.info(
+                        "Folder id=%s title=%r has no explicitly included peers (include_peers/pinned_peers); dialogs list will be empty.",
+                        f_id,
+                        title,
+                    )
 
-            folders.append(FolderInfo(id=f_id, title=title, is_default=is_default))
+                async def resolve_one(peer):
+                    try:
+                        entity = await client.get_entity(peer)
+                        return FolderDialogRef(
+                            id=entity.id, title=_entity_title(entity)
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Could not resolve peer for folder %s: %s",
+                            f_id,
+                            e,
+                        )
+                        return None
+
+                resolved = await asyncio.gather(
+                    *[resolve_one(peer) for peer in peers_by_id.values()]
+                )
+                dialogs = [r for r in resolved if r is not None]
+
+            folders.append(FolderInfo(id=f_id, title=title, dialogs=dialogs))
 
         return folders
 

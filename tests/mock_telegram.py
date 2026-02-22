@@ -120,6 +120,15 @@ class FakeTotalList(list):
 
 
 @dataclass
+class FakeInputPeer:
+    """Mimics InputPeerUser / InputPeerChat / InputPeerChannel."""
+
+    user_id: Optional[int] = None
+    chat_id: Optional[int] = None
+    channel_id: Optional[int] = None
+
+
+@dataclass
 class FakeDialogFilterTitle:
     text: str
 
@@ -128,6 +137,9 @@ class FakeDialogFilterTitle:
 class FakeDialogFilter:
     id: int
     title: FakeDialogFilterTitle
+    include_peers: List = field(default_factory=list)
+    pinned_peers: List = field(default_factory=list)
+    exclude_peers: List = field(default_factory=list)
 
 
 @dataclass
@@ -185,7 +197,25 @@ class MockTelegramClient:
         return self._me
 
     async def get_entity(self, entity_id):
-        return FakeEntity(id=entity_id, title=f"Dialog {entity_id}")
+        # Support int, entity with .id, or InputPeer-like (user_id/chat_id/channel_id)
+        if isinstance(entity_id, int):
+            eid = entity_id
+        elif (
+            hasattr(entity_id, "user_id")
+            or hasattr(entity_id, "chat_id")
+            or hasattr(entity_id, "channel_id")
+        ):
+            eid = (
+                getattr(entity_id, "user_id", None)
+                or getattr(entity_id, "chat_id", None)
+                or getattr(entity_id, "channel_id", None)
+            )
+        else:
+            eid = getattr(entity_id, "id", entity_id)
+        for d in self.dialogs:
+            if d.entity.id == eid:
+                return d.entity
+        return FakeEntity(id=eid, title=f"Dialog {eid}")
 
     async def iter_dialogs(self, **kwargs):
         for d in self.dialogs:
