@@ -7,7 +7,7 @@ telegram_batch_size: 100
 repair_media: true
 download_file_types:
   photos: true
-  videos: false
+  videos: true
   voice_messages: true
   video_messages: true
   stickers: true

@@ -40,7 +40,7 @@ class DownloadFileTypes(BaseModel):
     """Per-file-type download toggles."""
 
     photos: bool = True
-    videos: bool = False
+    videos: bool = True
     voice_messages: bool = True
     video_messages: bool = True
     stickers: bool = True
