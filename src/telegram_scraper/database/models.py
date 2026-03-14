@@ -89,6 +89,9 @@ class Message(SQLModel, table=True):
     post_author: Optional[str] = None
     is_forwarded: int  # 0 or 1
     forwarded_from_channel_id: Optional[int] = None  # No FK
+    forwarded_from_user_id: Optional[int] = None
+    forwarded_from_name: Optional[str] = None  # Resolved name or privacy fallback
+    forwarded_from_date: Optional[str] = None  # ISO format, original message date
 
     # Media reference (EXCEPTION: has FK since we always create MediaFile entry)
     media_uuid: Optional[str] = Field(

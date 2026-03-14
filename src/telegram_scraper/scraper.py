@@ -12,6 +12,7 @@ from telethon.tl.types import (
     MessageMediaWebPage,
     User,
     PeerChannel,
+    PeerUser,
 )
 from sqlmodel import Session
 
@@ -158,6 +159,9 @@ async def download_from_telegram_batched(
     else:
         iter_kwargs = {"offset_date": end_date, "reverse": False}
 
+    # Cache resolved forward-entity info to avoid redundant get_entity() calls
+    fwd_entity_cache: dict[tuple[str, int], dict] = {}
+
     async for message in client.iter_messages(entity, **iter_kwargs):
         if reverse and message.date > end_date:
             break
@@ -171,14 +175,83 @@ async def download_from_telegram_batched(
             fwd_from = getattr(message, "fwd_from", None)
             is_forwarded = 1 if fwd_from else 0
             forwarded_from_channel_id = None
+            forwarded_from_user_id = None
+            forwarded_from_name = None
+            forwarded_from_date = None
+            fwd_first_name = None
+            fwd_last_name = None
+            fwd_username = None
+            fwd_channel_name = None
+            fwd_channel_username = None
+
             if fwd_from:
+                if getattr(fwd_from, "date", None):
+                    forwarded_from_date = fwd_from.date.strftime("%Y-%m-%d %H:%M:%S")
                 peer = getattr(fwd_from, "from_id", None) or getattr(
                     fwd_from, "saved_from_peer", None
                 )
-                if isinstance(peer, PeerChannel):
+                if isinstance(peer, PeerUser):
+                    forwarded_from_user_id = peer.user_id
+                    key = ("user", peer.user_id)
+                    if key not in fwd_entity_cache:
+                        try:
+                            fwd_entity = await client.get_entity(peer)
+                            if isinstance(fwd_entity, User):
+                                fn = getattr(fwd_entity, "first_name", None)
+                                ln = getattr(fwd_entity, "last_name", None)
+                                un = getattr(fwd_entity, "username", None)
+                                name = (
+                                    " ".join(
+                                        p for p in (fn or "", ln or "") if p
+                                    ).strip()
+                                    or None
+                                )
+                                fwd_entity_cache[key] = {
+                                    "fwd_first_name": fn,
+                                    "fwd_last_name": ln,
+                                    "fwd_username": un,
+                                    "forwarded_from_name": name,
+                                }
+                            else:
+                                fwd_entity_cache[key] = {}
+                        except Exception as e:
+                            logger.debug(
+                                "Could not resolve forward user %s: %s",
+                                peer.user_id,
+                                e,
+                            )
+                            fwd_entity_cache[key] = {}
+                    cached = fwd_entity_cache.get(key, {})
+                    fwd_first_name = cached.get("fwd_first_name")
+                    fwd_last_name = cached.get("fwd_last_name")
+                    fwd_username = cached.get("fwd_username")
+                    forwarded_from_name = cached.get("forwarded_from_name")
+                elif isinstance(peer, PeerChannel):
                     forwarded_from_channel_id = peer.channel_id
-                else:
-                    forwarded_from_channel_id = getattr(peer, "channel_id", None)
+                    key = ("channel", peer.channel_id)
+                    if key not in fwd_entity_cache:
+                        try:
+                            fwd_entity = await client.get_entity(peer)
+                            title = getattr(fwd_entity, "title", None)
+                            un = getattr(fwd_entity, "username", None)
+                            fwd_entity_cache[key] = {
+                                "fwd_channel_name": title,
+                                "fwd_channel_username": un,
+                                "forwarded_from_name": title,
+                            }
+                        except Exception as e:
+                            logger.debug(
+                                "Could not resolve forward channel %s: %s",
+                                peer.channel_id,
+                                e,
+                            )
+                            fwd_entity_cache[key] = {}
+                    cached = fwd_entity_cache.get(key, {})
+                    fwd_channel_name = cached.get("fwd_channel_name")
+                    fwd_channel_username = cached.get("fwd_channel_username")
+                    forwarded_from_name = cached.get("forwarded_from_name")
+                if not forwarded_from_name:
+                    forwarded_from_name = getattr(fwd_from, "from_name", None)
 
             # Always collect media metadata (even if we don't download)
             media_type = None
@@ -236,6 +309,14 @@ async def download_from_telegram_batched(
                 post_author=message.post_author,
                 is_forwarded=is_forwarded,
                 forwarded_from_channel_id=forwarded_from_channel_id,
+                forwarded_from_user_id=forwarded_from_user_id,
+                forwarded_from_name=forwarded_from_name,
+                forwarded_from_date=forwarded_from_date,
+                fwd_first_name=fwd_first_name,
+                fwd_last_name=fwd_last_name,
+                fwd_username=fwd_username,
+                fwd_channel_name=fwd_channel_name,
+                fwd_channel_username=fwd_channel_username,
             )
 
             batch.append(msg_data)
@@ -517,6 +598,9 @@ async def stream_messages_with_cache(
                         "post_author": msg.post_author,
                         "is_forwarded": msg.is_forwarded,
                         "forwarded_from_channel_id": msg.forwarded_from_channel_id,
+                        "forwarded_from_user_id": msg.forwarded_from_user_id,
+                        "forwarded_from_name": msg.forwarded_from_name,
+                        "forwarded_from_date": msg.forwarded_from_date,
                         "media_type": msg.media_type,
                         "media_uuid": msg.media_uuid,
                         "media_original_filename": msg.media_original_filename,

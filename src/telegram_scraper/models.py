@@ -41,6 +41,16 @@ class MessageData:
     reply_to: Optional[int] = None
     post_author: Optional[str] = None
     forwarded_from_channel_id: Optional[int] = None
+    forwarded_from_user_id: Optional[int] = None
+    forwarded_from_name: Optional[str] = None
+    forwarded_from_date: Optional[str] = None
+
+    # Resolved forward author info for upsert into users/dialogs (no FK)
+    fwd_first_name: Optional[str] = None
+    fwd_last_name: Optional[str] = None
+    fwd_username: Optional[str] = None
+    fwd_channel_name: Optional[str] = None
+    fwd_channel_username: Optional[str] = None
 
     # Media (metadata always filled when media exists; path only when downloaded)
     media_type: Optional[str] = None  # MediaCategory value: "photos", "videos", etc.

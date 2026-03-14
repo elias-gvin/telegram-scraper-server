@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional, List, Any
+
+try:
+    from telethon.tl.types import PeerUser, PeerChannel
+except ImportError:
+    PeerUser = None  # type: ignore[misc, assignment]
+    PeerChannel = None  # type: ignore[misc, assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -43,8 +49,22 @@ class FakeEntity:
 
 
 # ---------------------------------------------------------------------------
-# Fake message
+# Fake forward header and message
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class FakeMessageFwdHeader:
+    """Mimics Telethon MessageFwdHeader for forwarded message metadata.
+
+    from_id: use telethon.tl.types.PeerUser or PeerChannel for tests so
+    isinstance() in the scraper works; or None for privacy-restricted (from_name only).
+    """
+
+    from_id: Any = None  # PeerUser(user_id) or PeerChannel(channel_id) or None
+    from_name: Optional[str] = None
+    date: Optional[datetime] = None
+    saved_from_peer: Any = None
 
 
 @dataclass
@@ -60,7 +80,7 @@ class FakeMessage:
     reply_to: None = None
     reply_to_msg_id: None = None
     post_author: Optional[str] = None
-    fwd_from: None = None
+    fwd_from: Optional[FakeMessageFwdHeader] = None
     edit_date: None = None
     file: None = None
 
@@ -197,6 +217,20 @@ class MockTelegramClient:
         return self._me
 
     async def get_entity(self, entity_id):
+        # PeerUser / PeerChannel only (forward source resolution in scraper)
+        if PeerUser is not None and isinstance(entity_id, PeerUser):
+            return FakeUser(
+                id=entity_id.user_id,
+                first_name="Fwd",
+                last_name="User",
+                username=None,
+            )
+        if PeerChannel is not None and isinstance(entity_id, PeerChannel):
+            return FakeEntity(
+                id=entity_id.channel_id,
+                title="Fwd Channel",
+                username=None,
+            )
         # Support int, entity with .id, or InputPeer-like (user_id/chat_id/channel_id)
         if isinstance(entity_id, int):
             eid = entity_id

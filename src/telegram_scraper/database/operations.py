@@ -17,6 +17,7 @@ def upsert_dialog(
     dialog_id: str | int,
     name: str,
     username: str | None = None,
+    auto_commit: bool = True,
 ) -> Dialog:
     """
     Insert or update dialog information.
@@ -26,6 +27,7 @@ def upsert_dialog(
         dialog_id: Dialog ID
         name: Dialog name/title
         username: Dialog username (e.g., @username)
+        auto_commit: If True, commit after upsert; if False, caller manages transaction
 
     Returns:
         Dialog object
@@ -46,8 +48,9 @@ def upsert_dialog(
         )
         session.add(dialog)
 
-    session.commit()
-    session.refresh(dialog)
+    if auto_commit:
+        session.commit()
+        session.refresh(dialog)
     return dialog
 
 
@@ -132,6 +135,30 @@ def batch_upsert_messages(
             auto_commit=False,
         )
 
+        # Upsert forward source user when message was forwarded from a user
+        fwd_user_id = getattr(msg, "forwarded_from_user_id", None)
+        if fwd_user_id is not None:
+            upsert_user(
+                session,
+                user_id=int(fwd_user_id),
+                first_name=getattr(msg, "fwd_first_name", None),
+                last_name=getattr(msg, "fwd_last_name", None),
+                username=getattr(msg, "fwd_username", None),
+                auto_commit=False,
+            )
+
+        # Upsert forward source channel into dialogs when message was forwarded from a channel
+        fwd_channel_id = getattr(msg, "forwarded_from_channel_id", None)
+        if fwd_channel_id is not None:
+            fwd_name = getattr(msg, "fwd_channel_name", None) or str(fwd_channel_id)
+            upsert_dialog(
+                session,
+                dialog_id=int(fwd_channel_id),
+                name=fwd_name,
+                username=getattr(msg, "fwd_channel_username", None),
+                auto_commit=False,
+            )
+
         # Check if message exists
         existing = session.exec(
             select(Message).where(
@@ -154,6 +181,11 @@ def batch_upsert_messages(
                 existing.forwarded_from_channel_id = getattr(
                     msg, "forwarded_from_channel_id", None
                 )
+                existing.forwarded_from_user_id = getattr(
+                    msg, "forwarded_from_user_id", None
+                )
+                existing.forwarded_from_name = getattr(msg, "forwarded_from_name", None)
+                existing.forwarded_from_date = getattr(msg, "forwarded_from_date", None)
                 # media_uuid updated separately by store_media_with_uuid
         else:
             # Insert new message
@@ -170,6 +202,9 @@ def batch_upsert_messages(
                 forwarded_from_channel_id=getattr(
                     msg, "forwarded_from_channel_id", None
                 ),
+                forwarded_from_user_id=getattr(msg, "forwarded_from_user_id", None),
+                forwarded_from_name=getattr(msg, "forwarded_from_name", None),
+                forwarded_from_date=getattr(msg, "forwarded_from_date", None),
             )
             session.add(new_message)
 
@@ -382,6 +417,9 @@ def iter_messages_in_range(
                 "post_author": msg.post_author,
                 "is_forwarded": msg.is_forwarded,
                 "forwarded_from_channel_id": msg.forwarded_from_channel_id,
+                "forwarded_from_user_id": msg.forwarded_from_user_id,
+                "forwarded_from_name": msg.forwarded_from_name,
+                "forwarded_from_date": msg.forwarded_from_date,
                 "media_uuid": msg.media_uuid,
             }
             for msg, user in results

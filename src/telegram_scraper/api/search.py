@@ -42,6 +42,9 @@ class SearchMessageResult(BaseModel):
     post_author: Optional[str] = None
     is_forwarded: int
     forwarded_from_channel_id: Optional[int] = None
+    forwarded_from_user_id: Optional[int] = None
+    forwarded_from_name: Optional[str] = None
+    forwarded_from_date: Optional[str] = None
 
 
 class SearchMessagesResponse(BaseModel):
@@ -113,8 +116,18 @@ def _message_to_result(msg) -> Optional[SearchMessageResult]:
     # Forward info
     is_forwarded = 1 if msg.forward else 0
     forwarded_from_channel_id = None
-    if msg.forward and hasattr(msg.forward, "chat_id"):
-        forwarded_from_channel_id = msg.forward.chat_id
+    forwarded_from_user_id = None
+    forwarded_from_name = None
+    forwarded_from_date = None
+    if msg.forward:
+        if hasattr(msg.forward, "chat_id") and msg.forward.chat_id:
+            forwarded_from_channel_id = msg.forward.chat_id
+        if hasattr(msg.forward, "sender_id") and msg.forward.sender_id:
+            forwarded_from_user_id = msg.forward.sender_id
+        if hasattr(msg.forward, "from_name") and msg.forward.from_name:
+            forwarded_from_name = msg.forward.from_name
+        if hasattr(msg.forward, "date") and msg.forward.date:
+            forwarded_from_date = msg.forward.date.strftime("%Y-%m-%d %H:%M:%S")
 
     # Reply info
     reply_to = None
@@ -136,6 +149,9 @@ def _message_to_result(msg) -> Optional[SearchMessageResult]:
         post_author=getattr(msg, "post_author", None),
         is_forwarded=is_forwarded,
         forwarded_from_channel_id=forwarded_from_channel_id,
+        forwarded_from_user_id=forwarded_from_user_id,
+        forwarded_from_name=forwarded_from_name,
+        forwarded_from_date=forwarded_from_date,
     )
 
 
@@ -147,6 +163,7 @@ def _message_to_result(msg) -> Optional[SearchMessageResult]:
 @router.get(
     "/search/messages/{dialog_id}",
     response_model=SearchMessagesResponse,
+    response_model_exclude_none=True,
     summary="Search messages within a specific chat",
     description="""
 Search for messages containing specific words or phrases within a single dialog
@@ -261,6 +278,7 @@ async def search_messages_in_dialog(
 @router.get(
     "/search/messages",
     response_model=SearchMessagesResponse,
+    response_model_exclude_none=True,
     summary="Search messages across all chats",
     description="""
 Search for messages containing specific words or phrases across **all** Telegram dialogs
