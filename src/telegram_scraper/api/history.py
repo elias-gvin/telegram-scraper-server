@@ -21,7 +21,7 @@ from ..database import (
     get_session,
     ensure_dialog_directories,
 )
-from ..scraper import stream_messages_with_cache
+from ..scraper import stream_messages_with_cache, sync_messages_to_cache
 
 
 router = APIRouter(tags=["history"])
@@ -213,4 +213,137 @@ async def get_history(
         )
     except Exception as e:
         logger.error(f"Error in get_history: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+class SyncReport(BaseModel):
+    """Summary returned after POST /sync — fills cache for Telegram gaps only."""
+
+    dialog_id: int
+    messages_downloaded: int
+    messages_with_media: int
+    media_downloaded: int
+    media_skipped: int
+
+
+@router.post(
+    "/sync/{dialog_id}",
+    response_model=SyncReport,
+    summary="Sync dialog gaps into local cache",
+    description="""
+Download missing messages from Telegram into the local cache (SQLite + media)
+for the requested date range. Does not return message bodies — use
+`GET /history/{dialog_id}` to read them.
+
+Parameters match the history endpoint: optional `start_date` (default beginning
+of Telegram), `end_date` (default now), and `force_refresh` to bypass cache.
+
+Response counts only messages fetched from Telegram in this call (not rows
+served from cache).
+
+This is a **blocking** call — it returns only after downloads finish.
+
+Examples:
+- `POST /api/v3/sync/123` — fill gaps for full range (2013-01-01 .. now)
+- `POST /api/v3/sync/123?start_date=2024-06-01&end_date=2024-12-31`
+- `POST /api/v3/sync/123?force_refresh=true` — re-download range from Telegram
+""",
+)
+async def sync_dialog_endpoint(
+    dialog_id: Annotated[int, Path(description="Dialog ID")],
+    start_date: Annotated[
+        Optional[str],
+        Query(
+            description="Start date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to 2013-01-01"
+        ),
+    ] = None,
+    end_date: Annotated[
+        Optional[str],
+        Query(
+            description="End date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to now"
+        ),
+    ] = None,
+    force_refresh: Annotated[
+        bool, Query(description="Force re-download even if cached")
+    ] = False,
+    client: TelegramClient = Depends(get_telegram_client),
+    config: ServerConfig = Depends(get_config),
+) -> SyncReport:
+    """
+    Sync Telegram gaps into the local cache and return a summary.
+
+    Requires X-Telegram-Username header for authentication.
+    """
+    try:
+        if start_date:
+            start_dt = parse_date(start_date)
+        else:
+            start_dt = datetime(2013, 1, 1, tzinfo=timezone.utc)
+
+        if end_date:
+            end_dt = parse_date(end_date)
+        else:
+            end_dt = datetime.now(timezone.utc)
+
+        if start_dt >= end_dt:
+            return SyncReport(
+                dialog_id=dialog_id,
+                messages_downloaded=0,
+                messages_with_media=0,
+                media_downloaded=0,
+                media_skipped=0,
+            )
+
+        paths = ensure_dialog_directories(config.dialogs_dir, dialog_id)
+        engine = get_engine(paths.db_file, check_same_thread=False)
+        create_db_and_tables(engine)
+
+        # Upsert dialog info
+        try:
+            entity = await client.get_entity(dialog_id)
+            dialog_name = getattr(entity, "title", None) or str(dialog_id)
+            dialog_username = getattr(entity, "username", None)
+
+            with get_session(paths.db_file, check_same_thread=False) as session:
+                operations.upsert_dialog(
+                    session,
+                    dialog_id=str(dialog_id),
+                    name=dialog_name,
+                    username=dialog_username,
+                )
+        except Exception as e:
+            logger.warning(f"Could not update dialog info: {e}")
+
+        with get_session(paths.db_file, check_same_thread=False) as session:
+            stats = await sync_messages_to_cache(
+                client,
+                session,
+                dialog_id,
+                start_dt,
+                end_dt,
+                settings=config.settings,
+                force_refresh=force_refresh,
+                output_dir=config.dialogs_dir,
+                reverse=True,
+            )
+
+        return SyncReport(
+            dialog_id=dialog_id,
+            messages_downloaded=stats.messages_downloaded,
+            messages_with_media=stats.messages_with_media,
+            media_downloaded=stats.media_downloaded,
+            media_skipped=stats.media_skipped,
+        )
+
+    except HTTPException:
+        raise
+    except FloodWaitError as e:
+        logger.error("Telegram rate limit in sync_dialog: retry-after %ds", e.seconds)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Telegram rate limit exceeded. Retry after {e.seconds} seconds.",
+            headers={"Retry-After": str(e.seconds)},
+        )
+    except Exception as e:
+        logger.error(f"Error in sync_dialog: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

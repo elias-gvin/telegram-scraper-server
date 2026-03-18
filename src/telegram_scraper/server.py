@@ -106,6 +106,7 @@ def create_app(config: ServerConfig) -> FastAPI:
                 "search_messages_in_dialog": f"{API_PREFIX}/search/messages/{{dialog_id}}",
                 "folders": f"{API_PREFIX}/folders",
                 "history": f"{API_PREFIX}/history/{{dialog_id}}",
+                "sync_dialog": f"{API_PREFIX}/sync/{{dialog_id}}",
                 "files": f"{API_PREFIX}/files/{{file_uuid}}",
                 "settings": f"{API_PREFIX}/settings",
             },

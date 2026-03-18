@@ -17,7 +17,7 @@ from telethon.tl.types import (
 from sqlmodel import Session
 
 from .database import operations
-from .models import MessageData, DateRange, TimelineSegment
+from .models import MessageData, DateRange, TimelineSegment, SyncStats
 from .media_downloader import download_media, get_media_metadata
 from .config import RuntimeSettings
 
@@ -403,6 +403,41 @@ def _batch_insert_messages(
     # NO COMMIT - caller manages transaction
 
 
+def compute_segments(
+    session: Session,
+    dialog_id: int,
+    start_date: datetime,
+    end_date: datetime,
+    force_refresh: bool,
+) -> List[TimelineSegment]:
+    """
+    Build cache vs telegram timeline segments for the requested date range.
+
+    Segments are in chronological order (same as build_timeline output).
+    Callers that need newest-first iteration (reverse=False) should reverse
+    the list themselves, matching stream_messages_with_cache.
+    """
+    if force_refresh:
+        return [TimelineSegment(start_date, end_date, "telegram")]
+
+    cached_range_tuple = operations.get_cached_date_range(session, dialog_id)
+    if cached_range_tuple:
+        cached_start = cached_range_tuple[0]
+        cached_end = cached_range_tuple[1]
+        if cached_start.tzinfo is None:
+            cached_start = cached_start.replace(tzinfo=timezone.utc)
+        if cached_end.tzinfo is None:
+            cached_end = cached_end.replace(tzinfo=timezone.utc)
+        cached_range = DateRange(cached_start, cached_end)
+    else:
+        cached_range = None
+
+    requested = DateRange(start_date, end_date)
+    gaps = find_gaps(requested, cached_range)
+    covered = find_covered_range(requested, cached_range)
+    return build_timeline(covered, gaps)
+
+
 async def stream_messages_with_cache(
     client: TelegramClient,
     session: Session,
@@ -426,30 +461,7 @@ async def stream_messages_with_cache(
     """
     client_buffer = []
 
-    if force_refresh:
-        # Download everything, ignore cache
-        segments = [TimelineSegment(start_date, end_date, "telegram")]
-    else:
-        # Check cache and find gaps
-        cached_range_tuple = operations.get_cached_date_range(session, dialog_id)
-        # Convert tuple to DateRange object (ensure timezone-aware)
-        if cached_range_tuple:
-            # Database dates might be timezone-naive, so add UTC timezone if needed
-            cached_start = cached_range_tuple[0]
-            cached_end = cached_range_tuple[1]
-            if cached_start.tzinfo is None:
-                cached_start = cached_start.replace(tzinfo=timezone.utc)
-            if cached_end.tzinfo is None:
-                cached_end = cached_end.replace(tzinfo=timezone.utc)
-            cached_range = DateRange(cached_start, cached_end)
-        else:
-            cached_range = None
-
-        requested = DateRange(start_date, end_date)
-
-        gaps = find_gaps(requested, cached_range)
-        covered = find_covered_range(requested, cached_range)
-        segments = build_timeline(covered, gaps)
+    segments = compute_segments(session, dialog_id, start_date, end_date, force_refresh)
 
     # When reverse=False (newest-first), process segments from end_date toward
     # start_date so that messages stream in descending order.
@@ -618,3 +630,63 @@ async def stream_messages_with_cache(
     # Flush remainder
     if client_buffer:
         yield client_buffer
+
+
+async def sync_messages_to_cache(
+    client: TelegramClient,
+    session: Session,
+    dialog_id: int,
+    start_date: datetime,
+    end_date: datetime,
+    settings: RuntimeSettings,
+    force_refresh: bool,
+    output_dir: Path,
+    reverse: bool = True,
+) -> SyncStats:
+    """
+    Download only Telegram gap segments into the cache and return aggregate stats.
+
+    Does not read or yield cached rows. Uses the same segment logic as
+    stream_messages_with_cache (with matching *reverse* ordering).
+    """
+    messages_downloaded = 0
+    messages_with_media = 0
+    media_downloaded = 0
+    media_skipped = 0
+
+    segments = compute_segments(session, dialog_id, start_date, end_date, force_refresh)
+    if not reverse:
+        segments = list(segments)
+        segments.reverse()
+
+    retrieve_messages_batch_size = settings.telegram_batch_size
+    for segment in segments:
+        if segment.source != "telegram":
+            continue
+        async for telegram_batch in download_from_telegram_batched(
+            client,
+            session,
+            dialog_id,
+            segment.start,
+            segment.end,
+            retrieve_messages_batch_size,
+            settings,
+            output_dir,
+            force_redownload=force_refresh,
+            reverse=reverse,
+        ):
+            for msg in telegram_batch:
+                messages_downloaded += 1
+                if msg.media_type:
+                    messages_with_media += 1
+                    if msg.media_path:
+                        media_downloaded += 1
+                    else:
+                        media_skipped += 1
+
+    return SyncStats(
+        messages_downloaded=messages_downloaded,
+        messages_with_media=messages_with_media,
+        media_downloaded=media_downloaded,
+        media_skipped=media_skipped,
+    )

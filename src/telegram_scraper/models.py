@@ -77,3 +77,13 @@ class TimelineSegment:
     start: datetime
     end: datetime
     source: Literal["cache", "telegram"]
+
+
+@dataclass
+class SyncStats:
+    """Aggregated counts from sync_messages_to_cache (Telegram download path only)."""
+
+    messages_downloaded: int
+    messages_with_media: int
+    media_downloaded: int
+    media_skipped: int
