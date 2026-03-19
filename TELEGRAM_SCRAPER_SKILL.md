@@ -311,7 +311,54 @@ curl -s -H "X-Telegram-Username: $USERNAME" \
   "http://localhost:8000/api/v3/search/messages?q=invoice&limit=100"
 ```
 
-### 4. Message History (SSE Streaming)
+### 4. Sync Dialog (Cache Fill)
+
+`POST /api/v3/sync/{dialog_id}`
+
+Download missing messages from Telegram into the local cache for the requested date range. Returns a summary — use `GET /history` afterwards to read the cached messages.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `start_date` | string | `2013-01-01` | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` |
+| `end_date` | string | now | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` |
+| `force_refresh` | bool | `false` | Bypass cache and re-download from Telegram |
+
+Only Telegram gap segments are downloaded — already-cached ranges are skipped automatically.
+
+**Response:**
+
+```json
+{
+  "dialog_id": -1001234567890,
+  "messages_downloaded": 1423,
+  "messages_with_media": 87,
+  "media_downloaded": 52,
+  "media_skipped": 35
+}
+```
+
+- `messages_downloaded` — messages fetched from Telegram in this call (not from cache)
+- `messages_with_media` — of those, how many had media attached
+- `media_downloaded` — media files actually downloaded to disk
+- `media_skipped` — media not downloaded (disabled in settings, size limit, type filter)
+
+**Examples:**
+
+```bash
+# Sync full history
+curl -s -X POST -H "X-Telegram-Username: $USERNAME" \
+  "http://localhost:8000/api/v3/sync/-1001234567890"
+
+# Sync specific date range
+curl -s -X POST -H "X-Telegram-Username: $USERNAME" \
+  "http://localhost:8000/api/v3/sync/-1001234567890?start_date=2024-06-01&end_date=2024-12-31"
+
+# Force re-download (bypass cache)
+curl -s -X POST -H "X-Telegram-Username: $USERNAME" \
+  "http://localhost:8000/api/v3/sync/-1001234567890?force_refresh=true"
+```
+
+### 5. Message History (SSE Streaming)
 
 `GET /api/v3/history/{dialog_id}`
 
@@ -381,7 +428,7 @@ Key details:
 - `media_original_filename` is `null` for photos (only documents/audio carry filenames)
 - `is_forwarded`: `0` or `1` (integer, not boolean)
 
-### 5. Download Media
+### 6. Download Media
 
 `GET /api/v3/files/{file_uuid}`
 
@@ -421,7 +468,7 @@ HOST_PATH="${CONTAINER_PATH/\/app\/data/\/root\/telegram-scraper-data}"
 cp "$HOST_PATH" ./my_file.jpg
 ```
 
-### 6. Settings
+### 7. Settings
 
 `GET /api/v3/settings` — read current settings
 `PATCH /api/v3/settings` — update (partial, only supplied fields change)
@@ -487,7 +534,8 @@ Docker volume mount maps `/app/data` → host path (e.g. `/root/telegram-scraper
 1. **Always use `-N` with curl** for SSE streaming endpoints (`/history/`)
 2. **Use `chunk_size=50`** for large histories to reduce rate limit risk
 3. **Media is capped at 20MB by default** — increase `max_media_size_mb` via settings if needed
-4. **Use `force_refresh=true` sparingly** — prefer cached data
+4. **Use `POST /sync` to pre-fill the cache** before reading with `GET /history` — avoids long SSE streams
+5. **Use `force_refresh=true` sparingly** — prefer cached data
 5. **Fuzzy search**: `min_score=0.6` for broad results, `0.8`+ for precise
 6. **Check server logs**: `docker logs telegram-scraper` for troubleshooting
 7. **Interactive API docs**: http://localhost:8000/docs (Swagger UI)

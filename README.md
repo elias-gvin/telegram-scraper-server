@@ -7,6 +7,7 @@ FastAPI-based server for scraping and caching Telegram messages with streaming s
 - 🚀 **RESTful API** with FastAPI
 - 📡 **Real-time streaming** via Server-Sent Events (SSE)
 - 💾 **Smart caching** - downloads only missing data, serves cached content instantly
+- 🔄 **Sync endpoint** - fill local cache on demand with download stats
 - 📦 **Chunked delivery** - configurable batch sizes for efficient data transfer
 - 🔐 **Header-based authentication** - simple X-Telegram-Username header
 - 🎯 **Media support** - download and serve media files with UUID-based access
@@ -152,6 +153,10 @@ curl -H "X-Telegram-Username: john_doe" \
 curl -H "X-Telegram-Username: john_doe" \
   "http://localhost:8000/api/v3/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250"
 
+# Sync a dialog into local cache
+curl -X POST -H "X-Telegram-Username: john_doe" \
+  "http://localhost:8000/api/v3/sync/-1001234567890?start_date=2024-01-01"
+
 # Search messages across all chats
 curl -H "X-Telegram-Username: john_doe" \
   "http://localhost:8000/api/v3/search/messages?q=hello"
@@ -263,7 +268,31 @@ Stream message history with smart caching:
 - `force_refresh=true` - Bypass cache and re-download
 - `reverse=true` (default) - Oldest-first; `reverse=false` - Newest-first
 
-### 4. Search Messages
+### 4. Sync Dialog
+
+```http
+POST /api/v3/sync/{dialog_id}?start_date={date}&end_date={date}
+Header: X-Telegram-Username: your_username
+```
+
+Download missing messages from Telegram into the local cache (SQLite + media) for the requested date range. Returns a summary instead of message bodies — use `GET /history` to read the cached data afterwards.
+
+- `start_date` / `end_date` - Optional, defaults to full range (2013-01-01 to now)
+- `force_refresh=true` - Bypass cache, re-download everything from Telegram
+
+Response:
+
+```json
+{
+  "dialog_id": -1001234567890,
+  "messages_downloaded": 1423,
+  "messages_with_media": 87,
+  "media_downloaded": 52,
+  "media_skipped": 35
+}
+```
+
+### 5. Search Messages
 
 ```http
 GET /api/v3/search/messages?q={query}
@@ -276,7 +305,7 @@ Search for messages containing specific words or phrases. Use the `q` query para
 - Per-dialog search: include `dialog_id` to search within a specific chat (`messages.search`)
 - Optional filters: `start_date`, `end_date`, `from_user` (per-dialog only), `limit`
 
-### 5. Media Files
+### 6. Media Files
 
 ```http
 GET /api/v3/files/{uuid}
@@ -285,7 +314,7 @@ Header: X-Telegram-Username: your_username
 
 Download media file by UUID (provided in message response).
 
-### 6. Settings
+### 7. Settings
 
 ```http
 GET /api/v3/settings
