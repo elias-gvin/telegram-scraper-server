@@ -40,6 +40,8 @@ class MessageResponse(BaseModel):
     username: str | None = None
     message: str
     reply_to: int | None = None
+    reply_quote_text: str | None = None
+    reply_quote_offset: int | None = None
     post_author: str | None = None
     is_forwarded: int
     forwarded_from_channel_id: int | None = None

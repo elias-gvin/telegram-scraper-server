@@ -84,6 +84,8 @@ class Message(SQLModel, table=True):
     reply_to: Optional[int] = Field(
         default=None, index=True
     )  # message_id of replied-to message (in same dialog)
+    reply_quote_text: Optional[str] = None
+    reply_quote_offset: Optional[int] = None
 
     # Author/forward info
     post_author: Optional[str] = None

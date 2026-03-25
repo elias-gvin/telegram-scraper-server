@@ -176,6 +176,8 @@ def batch_upsert_messages(
                 existing.sender_id = sender_id
                 existing.message = str(getattr(msg, "message"))
                 existing.reply_to = getattr(msg, "reply_to", None)
+                existing.reply_quote_text = getattr(msg, "reply_quote_text", None)
+                existing.reply_quote_offset = getattr(msg, "reply_quote_offset", None)
                 existing.post_author = getattr(msg, "post_author", None)
                 existing.is_forwarded = int(getattr(msg, "is_forwarded"))
                 existing.forwarded_from_channel_id = getattr(
@@ -197,6 +199,8 @@ def batch_upsert_messages(
                 sender_id=sender_id,
                 message=str(getattr(msg, "message")),
                 reply_to=getattr(msg, "reply_to", None),
+                reply_quote_text=getattr(msg, "reply_quote_text", None),
+                reply_quote_offset=getattr(msg, "reply_quote_offset", None),
                 post_author=getattr(msg, "post_author", None),
                 is_forwarded=int(getattr(msg, "is_forwarded")),
                 forwarded_from_channel_id=getattr(
@@ -414,6 +418,8 @@ def iter_messages_in_range(
                 "username": user.username if user else None,
                 "message": msg.message,
                 "reply_to": msg.reply_to,
+                "reply_quote_text": msg.reply_quote_text,
+                "reply_quote_offset": msg.reply_quote_offset,
                 "post_author": msg.post_author,
                 "is_forwarded": msg.is_forwarded,
                 "forwarded_from_channel_id": msg.forwarded_from_channel_id,

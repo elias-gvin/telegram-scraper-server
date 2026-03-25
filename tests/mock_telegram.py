@@ -68,6 +68,15 @@ class FakeMessageFwdHeader:
 
 
 @dataclass
+class FakeMessageReplyHeader:
+    """Mimics Telethon MessageReplyHeader used for replies/quotes."""
+
+    reply_to_msg_id: Optional[int] = None
+    quote_text: Optional[str] = None
+    quote_offset: Optional[int] = None
+
+
+@dataclass
 class FakeMessage:
     """Mimics telethon.tl.types.Message."""
 

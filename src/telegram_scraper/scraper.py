@@ -37,7 +37,7 @@ def transform_message_to_response(msg_dict: dict) -> dict:
     msg_dict.pop("media_path", None)
 
     # Keep media fields flat (media_type, media_uuid, media_size, media_original_filename)
-    # No transformation needed - just return the cleaned dict
+    # No further transformation needed - just return the cleaned dict
 
     return msg_dict
 
@@ -306,6 +306,12 @@ async def download_from_telegram_batched(
                 media_size=media_size,
                 media_uuid=None,  # Will be set after insertion
                 reply_to=message.reply_to_msg_id if message.reply_to else None,
+                reply_quote_text=getattr(message.reply_to, "quote_text", None)
+                if message.reply_to
+                else None,
+                reply_quote_offset=getattr(message.reply_to, "quote_offset", None)
+                if message.reply_to
+                else None,
                 post_author=message.post_author,
                 is_forwarded=is_forwarded,
                 forwarded_from_channel_id=forwarded_from_channel_id,
@@ -607,6 +613,8 @@ async def stream_messages_with_cache(
                         "username": msg.username,
                         "message": msg.message,
                         "reply_to": msg.reply_to,
+                        "reply_quote_text": msg.reply_quote_text,
+                        "reply_quote_offset": msg.reply_quote_offset,
                         "post_author": msg.post_author,
                         "is_forwarded": msg.is_forwarded,
                         "forwarded_from_channel_id": msg.forwarded_from_channel_id,

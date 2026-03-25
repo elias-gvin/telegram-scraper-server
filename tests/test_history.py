@@ -10,7 +10,12 @@ from telegram_scraper.api.history import MessageResponse
 from telegram_scraper.database import dialog_db_paths, get_session
 from telegram_scraper.database.models import Message
 
-from .mock_telegram import MockTelegramClient, FakeMessage, FakeUser
+from .mock_telegram import (
+    MockTelegramClient,
+    FakeMessage,
+    FakeUser,
+    FakeMessageReplyHeader,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +105,50 @@ class TestHistoryBasic:
         messages = parse_sse(resp.text)
         for m in messages:
             MessageResponse(**m)
+
+    @pytest.mark.asyncio
+    async def test_reply_quote_fields_follow_history_null_behavior(
+        self, client, mock_client
+    ):
+        quoted = FakeMessage(
+            id=999,
+            message="Replying with quote",
+            text="Replying with quote",
+            date=START + timedelta(minutes=1),
+            sender_id=100,
+            _sender=FakeUser(id=100, first_name="Alice"),
+            reply_to=FakeMessageReplyHeader(
+                reply_to_msg_id=123,
+                quote_text="selected phrase",
+                quote_offset=7,
+            ),
+        )
+        plain = FakeMessage(
+            id=1000,
+            message="Regular reply",
+            text="Regular reply",
+            date=START + timedelta(minutes=2),
+            sender_id=100,
+            _sender=FakeUser(id=100, first_name="Alice"),
+            reply_to=FakeMessageReplyHeader(reply_to_msg_id=124),
+        )
+        mock_client.set_messages(DIALOG_ID, [quoted, plain])
+
+        resp = await client.get(
+            f"/api/v3/history/{DIALOG_ID}",
+            params={"start_date": "2025-01-01", "end_date": "2025-01-02"},
+        )
+        messages = parse_sse(resp.text)
+
+        quoted_row = next(m for m in messages if m["message_id"] == 999)
+        plain_row = next(m for m in messages if m["message_id"] == 1000)
+
+        assert quoted_row["reply_quote_text"] == "selected phrase"
+        assert quoted_row["reply_quote_offset"] == 7
+        assert "reply_quote_text" in plain_row
+        assert plain_row["reply_quote_text"] is None
+        assert "reply_quote_offset" in plain_row
+        assert plain_row["reply_quote_offset"] is None
 
     @pytest.mark.asyncio
     async def test_date_range_filters_messages(self, client):

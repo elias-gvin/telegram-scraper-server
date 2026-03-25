@@ -411,6 +411,8 @@ data: {"messages": [{...}, {...}]}
   "username": "johndoe",
   "message": "Message content here",
   "reply_to": 12344,
+  "reply_quote_text": null,
+  "reply_quote_offset": null,
   "post_author": null,
   "is_forwarded": 0,
   "forwarded_from_channel_id": null,
@@ -427,6 +429,8 @@ Key details:
 - `media_uuid` is `null` when no media; use it with the files endpoint to download
 - `media_original_filename` is `null` for photos (only documents/audio carry filenames)
 - `is_forwarded`: `0` or `1` (integer, not boolean)
+- `reply_quote_text` contains the selected quoted fragment when replying to part of a message; otherwise `null`
+- `reply_quote_offset` is the character offset where the quoted fragment starts in the original replied-to message; otherwise `null`
 
 ### 6. Download Media
 

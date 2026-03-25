@@ -39,6 +39,8 @@ class MessageData:
 
     # Context (optional)
     reply_to: Optional[int] = None
+    reply_quote_text: Optional[str] = None
+    reply_quote_offset: Optional[int] = None
     post_author: Optional[str] = None
     forwarded_from_channel_id: Optional[int] = None
     forwarded_from_user_id: Optional[int] = None
