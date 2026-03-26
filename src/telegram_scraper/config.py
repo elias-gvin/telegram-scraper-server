@@ -70,7 +70,7 @@ class ServerConfig:
     data_dir: Path = field(default_factory=lambda: Path("./data"))
 
     # Server settings (from CLI)
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8000
 
     # Runtime-tunable settings (from settings.yaml)

@@ -130,8 +130,8 @@ def create_app(config: ServerConfig) -> FastAPI:
 @click.option(
     "--host",
     type=str,
-    default="0.0.0.0",
-    help="Server host (default: 0.0.0.0)",
+    default="127.0.0.1",
+    help="Server host (default: 127.0.0.1)",
 )
 @click.option(
     "--port",
