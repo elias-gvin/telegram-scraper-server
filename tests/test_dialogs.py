@@ -24,8 +24,11 @@ from .mock_telegram import (
 
 def channel(id, title, **kw):
     return types.Channel(
-        id=id, title=title, photo=types.ChatPhotoEmpty(),
-        date=datetime(2020, 1, 1, tzinfo=timezone.utc), **kw,
+        id=id,
+        title=title,
+        photo=types.ChatPhotoEmpty(),
+        date=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        **kw,
     )
 
 
@@ -38,7 +41,11 @@ def tg():
         # Broadcast channel
         FakeDialog(
             entity=channel(
-                100, "Crypto Traders", username="crypto", participants_count=5000, verified=True
+                100,
+                "Crypto Traders",
+                username="crypto",
+                participants_count=5000,
+                verified=True,
             ),
             message=FakeMessage(id=500, text="Latest BTC update"),
             date=now,
@@ -55,8 +62,12 @@ def tg():
         # Regular group
         FakeDialog(
             entity=types.Chat(
-                id=300, title="Family Group", photo=types.ChatPhotoEmpty(),
-                participants_count=4, date=now, version=1,
+                id=300,
+                title="Family Group",
+                photo=types.ChatPhotoEmpty(),
+                participants_count=4,
+                date=now,
+                version=1,
             ),
             message=FakeMessage(id=50, text="Hello!"),
             date=now,
@@ -227,9 +238,7 @@ class TestSearchDialogs:
             assert r["message_count"] >= 100
 
     @pytest.mark.asyncio
-    async def test_message_count_uses_real_count_not_message_id(
-        self, client, tg
-    ):
+    async def test_message_count_uses_real_count_not_message_id(self, client, tg):
         """message_count must come from get_messages().total, NOT from the
         top message ID. Regression test for the 884218-instead-of-400 bug."""
         # Override the count for entity 300 (Family Group, msg.id=50) to 42
@@ -330,3 +339,26 @@ class TestMeta:
         resp = await client.get("/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_message_counts_are_requested_one_at_a_time(client, tg):
+    """Never burst Telegram with parallel getHistory calls."""
+    import asyncio
+
+    in_flight, peak = 0, 0
+    original = tg.get_messages
+
+    async def get_messages(*a, **kw):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0)
+        try:
+            return await original(*a, **kw)
+        finally:
+            in_flight -= 1
+
+    tg.get_messages = get_messages
+    resp = await client.get("/api/v4/search/dialogs", params={"sort": "messages"})
+    assert resp.status_code == 200 and peak == 1

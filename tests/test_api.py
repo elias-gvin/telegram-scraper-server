@@ -346,3 +346,16 @@ async def test_revoked_session_is_401_and_drops_the_client(server_config, tg):
         evts = events((await c.get(f"{API}/history/{CHAT}")).text)
     assert evts[-1][0] == "error" and "AuthKeyUnregistered" in evts[-1][1]["error"]
     assert Holder.resets == 2
+
+
+async def test_unknown_ids_refresh_the_dialog_list_at_most_once(client, tg):
+    calls = []
+
+    async def get_dialogs(*a, **kw):
+        calls.append(1)
+        return []
+
+    tg.get_dialogs = get_dialogs
+    for bad in (-1009999, -1008888, 123456789):
+        assert (await client.get(f"{API}/history/{bad}")).status_code == 404
+    assert len(calls) == 1

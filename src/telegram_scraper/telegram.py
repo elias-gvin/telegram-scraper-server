@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from pathlib import Path
 
 from telethon import TelegramClient, utils
@@ -78,18 +79,29 @@ class TelegramHolder:
             self._client = None
 
 
+# Re-downloading the whole dialog list is expensive: at most once per client per 5 min.
+DIALOG_REFRESH_SECONDS = 300
+_dialogs_refreshed_at: dict[int, float] = {}
+
+
 async def resolve(client, dialog_id: int):
-    """Entity for a marked dialog id. Fills Telethon's entity cache from the dialog list if needed."""
+    """Entity for a marked dialog id. If Telethon doesn't know it yet, refresh its
+    entity cache from the dialog list (rate-limited) and try once more."""
     try:
         return await client.get_entity(dialog_id)
     except ValueError:
+        pass
+    last = _dialogs_refreshed_at.get(id(client), float("-inf"))
+    if time.monotonic() - last >= DIALOG_REFRESH_SECONDS:
+        _dialogs_refreshed_at[id(client)] = time.monotonic()
         await client.get_dialogs()
-    try:
-        return await client.get_entity(dialog_id)
-    except ValueError as e:
-        raise DialogNotFound(
-            f"Dialog {dialog_id} not found (use the marked id from /search/dialogs)"
-        ) from e
+        try:
+            return await client.get_entity(dialog_id)
+        except ValueError:
+            pass
+    raise DialogNotFound(
+        f"Dialog {dialog_id} not found (use the marked id from /search/dialogs)"
+    )
 
 
 def peer_fields(entity) -> dict:

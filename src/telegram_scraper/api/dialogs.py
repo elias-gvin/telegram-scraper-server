@@ -1,6 +1,5 @@
 """Dialog search and folder listing API endpoints."""
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
@@ -477,21 +476,18 @@ async def search_dialogs(
             info = _dialog_to_info(dialog, my_id)
             scored_results.append((score, info, dialog.entity))
 
-        # --- Real message counts (getHistory, limit=0) ---
-        limiter = asyncio.Semaphore(10)
-
+        # --- Real message counts: one getHistory request each, sent one after
+        # another (Telethon sleeps through short flood waits; long ones stop us) ---
         async def _fill_counts(pairs):
-            async def count(entity):
-                async with limiter:
-                    try:
-                        return (await client.get_messages(entity, limit=0)).total
-                    except Exception:  # noqa: BLE001 -- count stays unknown
-                        return None
-
-            for (info, _), n in zip(
-                pairs, await asyncio.gather(*[count(e) for _, e in pairs])
-            ):
-                info.message_count = n
+            for info, entity in pairs:
+                try:
+                    info.message_count = (
+                        await client.get_messages(entity, limit=0)
+                    ).total
+                except FloodWaitError:
+                    raise
+                except Exception:  # noqa: BLE001 -- this one count stays unknown
+                    info.message_count = None
 
         # Sorting by message count needs every count first; otherwise only the page's.
         if sort == SortField.messages:
@@ -592,24 +588,22 @@ async def list_folders(
                         title,
                     )
 
-                async def resolve_one(peer):
+                dialogs = []
+                for peer in peers_by_id.values():  # one request at a time
                     try:
                         entity = await client.get_entity(peer)
-                        return FolderDialogRef(
+                    except FloodWaitError:
+                        raise
+                    except Exception as e:  # noqa: BLE001 -- skip this one peer
+                        logger.warning(
+                            "Could not resolve peer for folder %s: %s", f_id, e
+                        )
+                        continue
+                    dialogs.append(
+                        FolderDialogRef(
                             id=utils.get_peer_id(entity), title=_entity_title(entity)
                         )
-                    except Exception as e:
-                        logger.warning(
-                            "Could not resolve peer for folder %s: %s",
-                            f_id,
-                            e,
-                        )
-                        return None
-
-                resolved = await asyncio.gather(
-                    *[resolve_one(peer) for peer in peers_by_id.values()]
-                )
-                dialogs = [r for r in resolved if r is not None]
+                    )
 
             folders.append(FolderInfo(id=f_id, title=title, dialogs=dialogs))
 
