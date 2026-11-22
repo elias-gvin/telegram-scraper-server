@@ -69,7 +69,7 @@ def compare(native: dict, ours: dict, c: Counter):
         c["service_with_reply_to (bad)"] += ours["reply_to"] is not None
         return
     c["messages"] += 1
-    c["text_mismatch"] += plain(native["text"]) != ours["message"]
+    c["text_mismatch"] += plain(native.get("text", "")) != ours["message"]
     c["sender_mismatch"] += native_peer(native.get("from_id")) != ours["sender_id"]
     if "edited" in native or ours["edit_date"]:
         c["edited"] += 1
@@ -89,7 +89,7 @@ def compare(native: dict, ours: dict, c: Counter):
         )
     native_entities = Counter(
         ENTITY_TYPES[e["type"]]
-        for e in native["text_entities"]
+        for e in native.get("text_entities", [])
         if e["type"] in ENTITY_TYPES
     )
     our_entities = Counter(e["type"] for e in ours.get("entities", []))
@@ -98,7 +98,7 @@ def compare(native: dict, ours: dict, c: Counter):
         c["formatting_lost"] += any(
             our_entities[k] < n for k, n in native_entities.items()
         )
-    urls = [e["href"] for e in native["text_entities"] if e["type"] == "text_link"]
+    urls = [e["href"] for e in native.get("text_entities", []) if e["type"] == "text_link"]
     if urls:
         c["text_link"] += 1
         c["text_link_url_lost"] += any(
