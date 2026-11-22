@@ -26,6 +26,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from telethon import utils
+from telethon.tl.alltlobjects import LAYER
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.types import Channel
 
@@ -52,6 +53,9 @@ class SyncReport:
     reached_start: bool = False
     covered_from: str | None = None  # date of the oldest archived message
     migrated_from: int | None = None  # old basic group, archived as its own dialog
+    layer: int | None = (
+        None  # oldest Telegram API layer the archived messages were read with
+    )
     # Everything currently not fully archived in this dialog (not only from this call).
     # message_id 0 = a problem with the dialog as a whole.
     problems: list[dict] = field(default_factory=list)
@@ -115,13 +119,22 @@ async def sync_dialog(
             await _download_media(ctx, entity, settings, media_dir)
         if reached_start:
             await _check_count(ctx, entity)
-        archive.finish_sync(did, reached_start, int(datetime.now(UTC).timestamp()))
+        # Every archived message was read by THIS client if the dialog was empty before
+        # or a full refresh just re-read it; otherwise older reads remain.
+        read_everything = state["high_id"] is None or (refresh and full)
+        archive.finish_sync(
+            did,
+            reached_start,
+            int(datetime.now(UTC).timestamp()),
+            LAYER if read_everything else None,
+        )
 
         final = archive.dialog(did)
         report.reached_start = bool(final["reached_start"])
         if final["low_id"] is not None:
             report.covered_from = iso(archive.message_date(did, final["low_id"]))
-        report.problems = archive.problems(did)
+        report.layer = final["layer"]
+        report.problems = archive.problems(did) + _stale_layer(final)
 
     if migrated_from is not None:
         old = await sync_dialog(
@@ -322,3 +335,19 @@ async def _check_count(ctx: _Context, entity):
         problem = f"count_mismatch: Telegram has {total} messages, archive {archived}"
     with ctx.archive.transaction():
         ctx.archive.set_problem(ctx.dialog_id, 0, problem)
+
+
+def _stale_layer(dialog) -> list[dict]:
+    """Warn when archived messages were read by an older Telegram client: newer
+    clients may receive more (e.g. rich posts). `full=true` re-reads them."""
+    if dialog["low_id"] is None or (dialog["layer"] or 0) >= LAYER:
+        return []
+    old = dialog["layer"] or "unknown"
+    return [
+        {
+            "dialog_id": dialog["dialog_id"],
+            "message_id": 0,
+            "problem": f"stale_layer: archived with Telegram layer {old}, client has {LAYER}; "
+            "run sync with full=true",
+        }
+    ]

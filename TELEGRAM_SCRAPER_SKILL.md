@@ -147,6 +147,10 @@ The response contains counts plus:
 - `migrated_from`: the group was upgraded from a basic group. Its older history
   is archived under that id; read it with `/history/{migrated_from}`.
 - `reached_start`, `covered_from`: how far back the archive goes.
+- `layer`: the oldest Telegram protocol layer the archived messages were read with
+  (`null` = unknown). If it is older than the server's Telethon, `problems`
+  contains `stale_layer: …`. Run `POST /sync/{id}?full=true` once: it re-reads
+  all messages, and re-downloads no media.
 
 ## Media
 
