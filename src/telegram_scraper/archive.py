@@ -66,6 +66,11 @@ MIGRATIONS = [
         PRIMARY KEY (dialog_id, message_id)
     );
     """,
+    """
+    -- Telegram API layer of the OLDEST read among this dialog's archived messages
+    -- (NULL = unknown: archived before this was tracked). See sync.py.
+    ALTER TABLE dialogs ADD COLUMN layer INTEGER;
+    """,
 ]
 
 
@@ -143,11 +148,15 @@ class Archive:
                 (dialog_id, title, username, migrated_from),
             )
 
-    def finish_sync(self, dialog_id: int, reached_start: bool, synced_at: int):
+    def finish_sync(
+        self, dialog_id: int, reached_start: bool, synced_at: int, layer: int | None
+    ):
+        """`layer`: set when every archived message was (re)read in this sync; else None."""
         with self.db:
             self.db.execute(
-                "UPDATE dialogs SET reached_start = max(reached_start, ?), synced_at = ? WHERE dialog_id = ?",
-                (int(reached_start), synced_at, dialog_id),
+                """UPDATE dialogs SET reached_start = max(reached_start, ?), synced_at = ?,
+                   layer = coalesce(?, layer) WHERE dialog_id = ?""",
+                (int(reached_start), synced_at, layer, dialog_id),
             )
 
     # --- writes (call inside `with archive.transaction():`) -----------------

@@ -287,3 +287,46 @@ async def test_media_step_can_be_skipped(env):
     assert archive.media(CHAT_ID, 1)["status"] == "pending"
     await sync()
     assert archive.media(CHAT_ID, 1)["status"] == "downloaded"
+
+
+async def test_layer_marker_warns_until_a_full_refresh(env):
+    """The archive remembers the oldest Telegram layer its messages were read with."""
+    from telethon.tl.alltlobjects import LAYER
+
+    fake, archive, _, sync, _ = env
+    fake.add(CHANNEL, *messages(range(1, 6)))
+
+    def stale(report):
+        return [
+            p["problem"]
+            for p in report.problems
+            if p["problem"].startswith("stale_layer")
+        ]
+
+    first = await sync()
+    assert first.layer == LAYER and stale(first) == []
+
+    with archive.transaction():  # pretend it was archived by an older client
+        archive.db.execute("UPDATE dialogs SET layer = 200")
+    fake.add(CHANNEL, text_msg(CHANNEL, 6, "new", date=NOW))
+    later = (
+        await sync()
+    )  # new messages arrive with the current layer, old ones stay old
+    assert later.new_messages == 1 and later.layer == 200
+    assert stale(later) == [
+        f"stale_layer: archived with Telegram layer 200, client has {LAYER}; run sync with full=true"
+    ]
+
+    refreshed = await sync(full=True)
+    assert refreshed.layer == LAYER and stale(refreshed) == []
+
+
+async def test_archives_from_before_layer_tracking_are_unknown(env):
+    fake, archive, _, sync, _ = env
+    fake.add(CHANNEL, *messages(range(1, 3)))
+    await sync()
+    with archive.transaction():
+        archive.db.execute("UPDATE dialogs SET layer = NULL")
+    report = await sync()
+    assert report.layer is None
+    assert any("layer unknown" in p["problem"] for p in report.problems)

@@ -98,6 +98,14 @@ data/
 One data directory belongs to one Telegram account. The archive refuses a
 session of a different account, because private-chat message ids are per account.
 
+## After upgrading Telethon
+
+A newer Telethon speaks a newer Telegram protocol layer and may receive more for
+the same message (rich posts, for example, were empty before 1.46). Each chat
+remembers the oldest layer its archived messages were read with. Sync reports a
+`stale_layer` problem until you run `POST /sync/{id}?full=true`, which re-reads
+every message (no media is re-downloaded).
+
 ## Re-downloading media files
 
 Telegram files never change, so a sync never downloads a file it already has.
