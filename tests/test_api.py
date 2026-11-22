@@ -401,3 +401,18 @@ async def test_sync_settings_override_applies_to_that_call_only(
 async def test_sync_override_is_validated(client):
     resp = await client.post(f"{API}/sync/{CHAT}", json={"refresh_days": -1})
     assert resp.status_code == 422
+
+
+async def test_requests_before_login_do_not_block_the_login(server_config):
+    """Calling the API before logging in must not create a session file (QR login would then 409)."""
+    from httpx import ASGITransport, AsyncClient
+
+    app = create_app(server_config)  # real client holder, no session file yet
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    ) as c:
+        resp = await c.get(f"{API}/search/dialogs")
+    assert resp.status_code == 401 and "POST /auth/qr" in resp.json()["detail"]
+    assert not list(server_config.sessions_dir.iterdir())

@@ -35,6 +35,12 @@ def check_account_name(name: str) -> str:
 
 async def connect(session_path: Path, api_id, api_hash) -> TelegramClient:
     """Connected, authorized client for an existing session file."""
+    if not Path(
+        f"{session_path}.session"
+    ).exists():  # don't let Telethon create an empty one
+        raise NotAuthorized(
+            f"No Telegram session for '{Path(session_path).name}': run tgsc-auth or POST /auth/qr"
+        )
     client = TelegramClient(
         str(session_path), int(api_id), str(api_hash), flood_sleep_threshold=120
     )
