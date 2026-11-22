@@ -359,3 +359,23 @@ async def test_unknown_ids_refresh_the_dialog_list_at_most_once(client, tg):
     for bad in (-1009999, -1008888, 123456789):
         assert (await client.get(f"{API}/history/{bad}")).status_code == 404
     assert len(calls) == 1
+
+
+async def test_id_telegram_rejects_is_404(client, tg, monkeypatch):
+    from telethon.errors import ChatIdInvalidError
+
+    async def invalid(*a, **kw):
+        raise ChatIdInvalidError(request=None)
+
+    monkeypatch.setattr(tg, "get_entity", invalid)
+    resp = await client.get(f"{API}/history/-1009999")
+    assert resp.status_code == 404 and "not found" in resp.json()["detail"]
+
+
+async def test_bare_id_is_rejected_with_a_hint(client, tg, monkeypatch):
+    async def guess(x):  # real Telethon may map a bare number to a cached channel
+        return CHANNEL
+
+    monkeypatch.setattr(tg, "get_entity", guess)
+    resp = await client.get(f"{API}/history/5000")
+    assert resp.status_code == 404 and str(CHAT) in resp.json()["detail"]

@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from telethon import TelegramClient, utils
-from telethon.errors import AuthKeyDuplicatedError, UnauthorizedError
+from telethon.errors import AuthKeyDuplicatedError, BadRequestError, UnauthorizedError
 
 ACCOUNT_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
@@ -85,11 +85,28 @@ _dialogs_refreshed_at: dict[int, float] = {}
 
 
 async def resolve(client, dialog_id: int):
+    """Entity for a *marked* dialog id (a bare number is ambiguous: user or channel?)."""
+    entity = await _lookup(client, dialog_id)
+    marked = utils.get_peer_id(entity)
+    if marked != dialog_id:
+        raise DialogNotFound(
+            f"Dialog id {dialog_id} is not a marked id; did you mean {marked}?"
+        )
+    return entity
+
+
+async def _lookup(client, dialog_id: int):
     """Entity for a marked dialog id. If Telethon doesn't know it yet, refresh its
     entity cache from the dialog list (rate-limited) and try once more."""
     try:
         return await client.get_entity(dialog_id)
-    except ValueError:
+    except (
+        BadRequestError
+    ) as e:  # Telegram: invalid id, or no access (e.g. CHANNEL_PRIVATE)
+        raise DialogNotFound(
+            f"Dialog {dialog_id} not found or not accessible: {e}"
+        ) from e
+    except ValueError:  # not in Telethon's entity cache yet
         pass
     last = _dialogs_refreshed_at.get(id(client), float("-inf"))
     if time.monotonic() - last >= DIALOG_REFRESH_SECONDS:
@@ -97,7 +114,7 @@ async def resolve(client, dialog_id: int):
         await client.get_dialogs()
         try:
             return await client.get_entity(dialog_id)
-        except ValueError:
+        except (ValueError, BadRequestError):
             pass
     raise DialogNotFound(
         f"Dialog {dialog_id} not found (use the marked id from /search/dialogs)"
