@@ -13,7 +13,7 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .media import media_info
 
@@ -44,9 +44,7 @@ _OTHER_KNOWN_MEDIA = {
 
 def iso(ts: int | None) -> str | None:
     return (
-        datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        if ts
-        else None
+        datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else None
     )
 
 

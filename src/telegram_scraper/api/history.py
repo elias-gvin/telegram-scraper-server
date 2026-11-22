@@ -6,7 +6,7 @@ import functools
 import json
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
@@ -71,7 +71,7 @@ async def get_history(
     config: ServerConfig = Depends(get_config),
 ):
     start = parse_date(start_date, "start_date")
-    end = parse_date(end_date, "end_date") or datetime.now(timezone.utc)
+    end = parse_date(end_date, "end_date") or datetime.now(UTC)
     if start and start >= end:
         raise HTTPException(
             status_code=400, detail="start_date must be before end_date"

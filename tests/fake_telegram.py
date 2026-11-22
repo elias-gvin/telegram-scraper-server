@@ -8,7 +8,7 @@ network is faked.
 from __future__ import annotations
 
 import itertools
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,7 +25,7 @@ CHANNEL = types.Channel(
     id=5000,
     title="Test Channel",
     photo=types.ChatPhotoEmpty(),
-    date=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    date=datetime(2020, 1, 1, tzinfo=UTC),
     username="testchan",
     broadcast=True,
 )
@@ -34,7 +34,7 @@ GROUP = types.Chat(
     title="Test Group",
     photo=types.ChatPhotoEmpty(),
     participants_count=3,
-    date=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    date=datetime(2020, 1, 1, tzinfo=UTC),
     version=1,
 )
 
@@ -42,11 +42,11 @@ SUPERGROUP = types.Channel(
     id=7000,
     title="Upgraded Group",
     photo=types.ChatPhotoEmpty(),
-    date=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    date=datetime(2020, 1, 1, tzinfo=UTC),
     megagroup=True,
 )
 
-T0 = datetime(2025, 1, 1, tzinfo=timezone.utc)
+T0 = datetime(2025, 1, 1, tzinfo=UTC)
 _ids = itertools.count(10_000)
 
 

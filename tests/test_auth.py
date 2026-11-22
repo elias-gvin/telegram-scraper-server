@@ -22,7 +22,9 @@ from .conftest import TOKEN
 async def client(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(
-        transport=transport, base_url="http://test", headers={"Authorization": f"Bearer {TOKEN}"}
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {TOKEN}"},
     ) as c:
         yield c
 
@@ -126,9 +128,7 @@ class TestStartQRAuth:
         with patch(
             "telegram_scraper.api.auth.TelegramClient", return_value=mock_client
         ):
-            resp = await client.post(
-                "/api/v4/auth/qr", json={"force": True}
-            )
+            resp = await client.post("/api/v4/auth/qr", json={"force": True})
 
         assert resp.status_code == 200
         data = resp.json()
@@ -206,9 +206,7 @@ class TestQRStatus:
             patch("telegram_scraper.api.auth.TelegramClient", return_value=mock_client),
             patch("telegram_scraper.api.auth.QR_TOKEN_REFRESH_SECONDS", 0.2),
         ):
-            start = await client.post(
-                "/api/v4/auth/qr", json={}
-            )
+            start = await client.post("/api/v4/auth/qr", json={})
             token = start.json()["token"]
             original_url = start.json()["qr_url"]
 
@@ -288,9 +286,7 @@ class TestTwoFactor:
         with patch(
             "telegram_scraper.api.auth.TelegramClient", return_value=mock_client
         ):
-            start = await client.post(
-                "/api/v4/auth/qr", json={}
-            )
+            start = await client.post("/api/v4/auth/qr", json={})
         token = start.json()["token"]
 
         # Try submitting 2FA while still pending
