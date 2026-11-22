@@ -23,11 +23,13 @@ built for one Telegram account and for an AI agent (see
 
 ## Quick start
 
+Requires [uv](https://docs.astral.sh/uv/); it installs Python 3.12 itself if needed.
+
 ```bash
-poetry install
-cp .env.example .env            # set TELEGRAM_API_ID / TELEGRAM_API_HASH (https://my.telegram.org/apps)
-tgsc-auth myaccount             # log in once (QR code or phone)
-tgsc-server --account myaccount # http://127.0.0.1:8000, docs at /docs
+uv sync                                 # Python 3.12 + locked dependencies in .venv
+cp .env.example .env                    # set TELEGRAM_API_ID / TELEGRAM_API_HASH (https://my.telegram.org/apps)
+uv run tgsc-auth myaccount              # log in once (QR code or phone)
+uv run tgsc-server --account myaccount  # http://127.0.0.1:8000, docs at /docs
 ```
 
 On first start the server writes a random API token to `data/token`. Every
@@ -109,8 +111,8 @@ It prints mismatch counts per field (no message content).
 ## Development
 
 ```bash
-pytest            # tests use a fake Telegram built from real Telethon objects
-ruff check src/
+uv run pytest            # tests use a fake Telegram built from real Telethon objects
+uv run ruff check src/
 ```
 
 ## Known limits

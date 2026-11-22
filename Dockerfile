@@ -1,22 +1,22 @@
 FROM python:3.12-slim AS builder
 
-# Install Poetry
-ENV POETRY_VERSION=2.1.1 \
-    POETRY_HOME="/opt/poetry" \
-    POETRY_VIRTUALENVS_IN_PROJECT=true \
-    POETRY_NO_INTERACTION=1
-RUN pip install --no-cache-dir "poetry==$POETRY_VERSION"
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /bin/uv
+
+# Use the image's Python, compile bytecode, copy (not link) files into the venv
+ENV UV_PYTHON_DOWNLOADS=0 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
 
 WORKDIR /app
 
-# Install dependencies first (layer caching)
-COPY pyproject.toml poetry.lock ./
-RUN poetry install --only main --no-root
+# Dependencies first (cached layer), exactly as locked
+COPY pyproject.toml uv.lock .python-version ./
+RUN uv sync --locked --no-dev --no-install-project
 
-# Copy source and install the project itself
+# Then the project itself, as a regular (non-editable) install
 COPY src/ src/
 COPY README.md ./
-RUN poetry install --only main
+RUN uv sync --locked --no-dev --no-editable
 
 
 # --- Runtime stage ---
@@ -24,9 +24,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Copy virtualenv and source from builder
+# The venv contains the dependencies and the installed project
 COPY --from=builder /app/.venv .venv
-COPY --from=builder /app/src src
 
 # Run as an unprivileged user; /app/data holds sessions, archive, media and the API token
 RUN useradd --create-home --uid 1000 scraper && mkdir -p /app/data && chown scraper /app/data
