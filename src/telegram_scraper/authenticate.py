@@ -10,14 +10,15 @@ import click
 import qrcode
 from telethon import TelegramClient
 from telethon.errors import (
-    SessionPasswordNeededError,
-    PhoneCodeInvalidError,
-    PhoneCodeExpiredError,
-    PhoneNumberInvalidError,
     FloodWaitError,
+    PhoneCodeExpiredError,
+    PhoneCodeInvalidError,
+    PhoneNumberInvalidError,
+    SessionPasswordNeededError,
 )
 
 from .config import load_credentials_from_env
+from .telegram import check_account_name
 
 logging.basicConfig(
     level=logging.ERROR,
@@ -285,8 +286,8 @@ async def authenticate_user_cli(
             show_user_info=True,
         )
 
-        click.echo("\n✅ You can now use this session with:")
-        click.secho(f"   X-Telegram-Username: {username}", fg="cyan")
+        click.echo("\n✅ Start the server for this account with:")
+        click.secho(f"   tgsc-server --account {username}", fg="cyan")
         click.echo()
 
         await client.disconnect()
@@ -334,6 +335,11 @@ def main(username, data_dir):
         click.secho(f"❌ Configuration error: {e}", fg="red")
         sys.exit(1)
 
+    try:
+        check_account_name(username)
+    except ValueError as e:
+        click.secho(f"❌ {e}", fg="red")
+        sys.exit(1)
     sessions_path = Path(data_dir) / "sessions"
 
     # Run authentication

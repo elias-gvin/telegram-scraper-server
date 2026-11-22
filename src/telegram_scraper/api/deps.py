@@ -1,20 +1,48 @@
-"""Shared FastAPI dependencies for all API modules."""
+"""Shared FastAPI dependencies."""
 
-from fastapi import HTTPException, Request
+from __future__ import annotations
 
+import secrets
+from datetime import datetime, timezone
+
+from fastapi import Header, HTTPException, Request
+
+from ..archive import Archive
 from ..config import ServerConfig
 
 
 def get_config(request: Request) -> ServerConfig:
-    """Extract ServerConfig from app state.
+    return request.app.state.config
 
-    The config is set once during startup in ``create_app`` via
-    ``app.state.config = config``.  Every endpoint that needs the
-    config should declare ``config: ServerConfig = Depends(get_config)``.
-    """
-    config: ServerConfig | None = getattr(request.app.state, "config", None)
-    if config is None:
+
+def get_archive(request: Request) -> Archive:
+    return request.app.state.archive
+
+
+async def get_client(request: Request):
+    """The connected Telegram client (NotAuthorized -> 401 via the app's exception handler)."""
+    return await request.app.state.telegram.get()
+
+
+def require_token(request: Request, authorization: str | None = Header(default=None)):
+    expected = f"Bearer {request.app.state.config.token}"
+    if not authorization or not secrets.compare_digest(authorization, expected):
         raise HTTPException(
-            status_code=500, detail="Server configuration not initialized"
+            status_code=401,
+            detail="Missing or wrong 'Authorization: Bearer <token>' (the token is in {data_dir}/token)",
         )
-    return config
+
+
+def parse_date(value: str | None, name: str) -> datetime | None:
+    """'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS' (UTC) -> aware datetime."""
+    if value is None:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    raise HTTPException(
+        status_code=400,
+        detail=f"Invalid {name} '{value}': use 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'",
+    )

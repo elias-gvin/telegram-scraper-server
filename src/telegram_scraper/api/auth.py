@@ -15,15 +15,13 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 
 from ..config import ServerConfig
-from . import auth_utils
 from .deps import get_config
 
 logger = logging.getLogger(__name__)
@@ -33,9 +31,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # ---------------------------------------------------------------------------
 # Module-level state
 # ---------------------------------------------------------------------------
-
-# Pending QR sessions keyed by token
-_qr_sessions: dict[str, _QRSession] = {}  # type: ignore[name-defined]  # forward ref
 
 
 # ---------------------------------------------------------------------------
@@ -59,16 +54,16 @@ class _QRSession:
     """Internal state for one QR login attempt."""
 
     __slots__ = (
-        "token",
-        "username",
-        "status",
-        "error_detail",
+        "_password_future",
+        "_wait_task",
         "client",
+        "created_at",
+        "error_detail",
         "qr_login",
         "qr_url",
-        "created_at",
-        "_wait_task",
-        "_password_future",
+        "status",
+        "token",
+        "username",
     )
 
     def __init__(
@@ -102,7 +97,7 @@ class _QRSession:
             await self.client.disconnect()
 
 
-# Fix forward reference
+# Pending QR sessions keyed by token
 _qr_sessions: dict[str, _QRSession] = {}
 
 
@@ -210,8 +205,7 @@ async def _wait_for_qr_scan(session: _QRSession):
 
 
 class QRStartRequest(BaseModel):
-    username: str
-    force: bool = False
+    force: bool = False  # replace the existing session of this server's account
 
 
 class QRStartResponse(BaseModel):
@@ -222,9 +216,9 @@ class QRStartResponse(BaseModel):
 
 class QRStatusResponse(BaseModel):
     status: QRStatus
-    username: str
-    qr_url: Optional[str] = None
-    error: Optional[str] = None
+    account: str
+    qr_url: str | None = None
+    error: str | None = None
     message: str
 
 
@@ -248,30 +242,27 @@ class TwoFARequest(BaseModel):
     ),
 )
 async def start_qr_auth(
-    body: QRStartRequest,
+    request: Request,
+    body: QRStartRequest | None = None,
     config: ServerConfig = Depends(get_config),
 ):
-    username = body.username.strip()
-    if not username:
-        raise HTTPException(status_code=400, detail="username must not be empty")
-
-    # Check if user already has a valid session
+    body = body or QRStartRequest()
+    username = config.account
     session_file = config.sessions_dir / f"{username}.session"
     if session_file.exists():
         if not body.force:
             raise HTTPException(
                 status_code=409,
-                detail=f"User '{username}' already has a session. "
-                f"Use force=true to re-authenticate, or use a different username.",
+                detail=f"Account '{username}' already has a session. "
+                "Use force=true to re-authenticate.",
             )
-        # Force re-auth: evict from client pool and remove old session file
-        await auth_utils.evict_client(username)
+        # Force re-auth: drop the live client and remove the old session file
+        await request.app.state.telegram.reset()
         session_file.unlink(missing_ok=True)
         logger.info("Force re-auth: removed existing session for '%s'", username)
 
     # Create a temporary Telegram client for this auth flow
-    session_path = str(config.sessions_dir / username)
-    client = TelegramClient(session_path, config.api_id, config.api_hash)
+    client = TelegramClient(str(config.session_path), config.api_id, config.api_hash)
 
     try:
         await client.connect()
@@ -322,7 +313,7 @@ async def get_qr_status(token: str):
     messages = {
         QRStatus.pending: "Waiting for QR code scan… (qr_url is auto-refreshed, re-render it each poll)",
         QRStatus.password_required: "QR scanned. Please submit your 2FA password via POST /auth/qr/{token}/2fa",
-        QRStatus.success: f"Authenticated! Use header 'X-Telegram-Username: {session.username}' for API requests.",
+        QRStatus.success: "Authenticated! The API can now use this account.",
         QRStatus.expired: "Session expired. Please start a new one with POST /auth/qr.",
         QRStatus.error: f"Authentication error: {session.error_detail}",
     }
@@ -332,7 +323,7 @@ async def get_qr_status(token: str):
 
     response = QRStatusResponse(
         status=session.status,
-        username=session.username,
+        account=session.username,
         qr_url=qr_url,
         error=session.error_detail,
         message=messages[session.status],
@@ -379,7 +370,7 @@ async def submit_2fa_password(token: str, body: TwoFARequest):
             break
 
     messages = {
-        QRStatus.success: f"Authenticated! Use header 'X-Telegram-Username: {session.username}' for API requests.",
+        QRStatus.success: "Authenticated! The API can now use this account.",
         QRStatus.error: f"2FA failed: {session.error_detail}",
         QRStatus.password_required: "Still processing…",
         QRStatus.pending: "Still processing…",
@@ -388,7 +379,7 @@ async def submit_2fa_password(token: str, body: TwoFARequest):
 
     response = QRStatusResponse(
         status=session.status,
-        username=session.username,
+        account=session.username,
         qr_url=None,
         error=session.error_detail,
         message=messages.get(session.status, "Unknown state"),

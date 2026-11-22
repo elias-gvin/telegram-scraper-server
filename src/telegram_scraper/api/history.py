@@ -1,351 +1,179 @@
-"""Message history API endpoints."""
+"""History (read from the archive) and sync (archive from Telegram) endpoints."""
 
-from fastapi import APIRouter, Query, Path, Depends, HTTPException
-from fastapi.responses import StreamingResponse
-from typing import Annotated, List, Optional
-from pydantic import BaseModel
-from datetime import datetime, timezone
+from __future__ import annotations
+
+import functools
 import json
 import logging
+from dataclasses import asdict
+from datetime import datetime, timezone
+from typing import Annotated
 
-from telethon import TelegramClient
-from telethon.errors import FloodWaitError
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
+from fastapi.responses import StreamingResponse
+from telethon import utils
 
-from .auth_utils import get_telegram_client
-from .deps import get_config
-from ..config import MediaCategory, ServerConfig
-from ..database import operations
-from ..database import (
-    get_engine,
-    create_db_and_tables,
-    get_session,
-    ensure_dialog_directories,
-)
-from ..scraper import stream_messages_with_cache, sync_messages_to_cache
-
+from ..archive import Archive
+from ..config import ServerConfig
+from ..serialize import serialize_row
+from ..sync import sync_dialog
+from ..telegram import SESSION_LOST, resolve
+from .deps import get_archive, get_client, get_config, parse_date
+from .settings import SettingsUpdate, apply_update
 
 router = APIRouter(tags=["history"])
 logger = logging.getLogger(__name__)
 
-
-class MessageResponse(BaseModel):
-    """Message data response model (flat shape matching scraper output)."""
-
-    message_id: int
-    date: str
-    edit_date: str | None = None
-    sender_id: int
-    first_name: str | None = None
-    last_name: str | None = None
-    username: str | None = None
-    message: str
-    reply_to: int | None = None
-    reply_quote_text: str | None = None
-    reply_quote_offset: int | None = None
-    post_author: str | None = None
-    is_forwarded: int
-    forwarded_from_channel_id: int | None = None
-    media_type: MediaCategory | None = None
-    media_uuid: str | None = None
-    media_size: int | None = None
-    media_original_filename: str | None = None
+DialogId = Annotated[
+    int,
+    Path(description="Marked dialog id (-100… channels, -… groups, users positive)"),
+]
 
 
-class MessagesListResponse(BaseModel):
-    """Response for non-streaming messages request."""
-
-    messages: List[MessageResponse]
-
-
-def parse_date(date_str: str) -> datetime:
-    """Parse date string to datetime (assumes UTC if no timezone specified)."""
-    try:
-        dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-        return dt.replace(tzinfo=timezone.utc)
-    except ValueError:
-        try:
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
-            return dt.replace(tzinfo=timezone.utc)
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid date format: {date_str}. Use 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'",
-            )
+def sse(data: dict, event: str | None = None) -> str:
+    head = f"event: {event}\n" if event else ""
+    return f"{head}data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 @router.get(
     "/history/{dialog_id}",
     response_class=StreamingResponse,
-    responses={
-        200: {
-            "model": MessagesListResponse,
-            "description": "SSE stream. Each `data:` event contains a batch of messages.",
-            "content": {"text/event-stream": {}},
-        }
-    },
-    summary="Get message history",
+    summary="Stream message history (syncs missing messages first)",
     description="""
-    Stream message history with smart caching via Server-Sent Events (SSE).
-    
-    - Messages are always streamed in chunks (SSE format)
-    - chunk_size: Number of messages per chunk (default: 100, must be > 0)
-    - start_date: Optional, defaults to beginning of chat
-    - end_date: Optional, defaults to current time
-    - force_refresh: Bypass cache and re-download from Telegram
-    
-    Examples:
-    - `/api/v1/history/123` (all messages, default 100/chunk)
-    - `/api/v1/history/123?chunk_size=50` (smaller chunks for faster updates)
-    - `/api/v1/history/123?start_date=2024-01-01&end_date=2024-01-31`
-    - `/api/v1/history/123?end_date=2024-01-31` (from beginning to Jan 31)
-    - `/api/v1/history/123?start_date=2024-01-01` (from Jan 1 to now)
-    - `/api/v1/history/123?force_refresh=true` (bypass cache)
-    """,
+Server-Sent Events. First the missing part of the requested range is synced
+from Telegram into the local archive, then messages are streamed from the
+archive ordered by message id:
+
+- `data: {"messages": [...]}` — one event per chunk
+- `event: done` with `{"count", "incomplete", "sync": {...report...}}` — the stream is complete
+- `event: error` with `{"error", "retry_after"}` — the stream is NOT complete
+
+A stream that ends without `done` is incomplete. History neither re-reads
+already archived messages nor downloads media; call `POST /sync/{dialog_id}`
+for edits, reactions, deletions and media files.
+""",
 )
 async def get_history(
-    dialog_id: Annotated[int, Path(description="Dialog ID")],
+    request: Request,
+    dialog_id: DialogId,
     start_date: Annotated[
-        Optional[str],
-        Query(
-            description="Start date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to chat beginning"
-        ),
+        str | None, Query(description="Inclusive, UTC. Default: beginning of the chat")
     ] = None,
     end_date: Annotated[
-        Optional[str],
-        Query(
-            description="End date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to now"
-        ),
+        str | None, Query(description="Inclusive, UTC. Default: now")
     ] = None,
-    chunk_size: Annotated[
-        int,
-        Query(gt=0, description="Number of messages per chunk in streaming response"),
-    ] = 100,
-    force_refresh: Annotated[
-        bool, Query(description="Force re-download even if cached")
-    ] = False,
+    chunk_size: Annotated[int, Query(gt=0, le=1000)] = 100,
     reverse: Annotated[
-        bool,
-        Query(
-            description="If True, return messages oldest-first. If False, newest-first."
-        ),
+        bool, Query(description="True: oldest first. False: newest first")
     ] = True,
-    client: TelegramClient = Depends(get_telegram_client),
+    client=Depends(get_client),
+    archive: Archive = Depends(get_archive),
     config: ServerConfig = Depends(get_config),
 ):
-    """
-    Get message history for a dialog.
+    start = parse_date(start_date, "start_date")
+    end = parse_date(end_date, "end_date") or datetime.now(timezone.utc)
+    if start and start >= end:
+        raise HTTPException(
+            status_code=400, detail="start_date must be before end_date"
+        )
+    entity = await resolve(client, dialog_id)
+    did = utils.get_peer_id(entity)
 
-    Requires X-Telegram-Username header for authentication.
-    """
-    try:
-        # Parse dates - use defaults if not provided
-        if start_date:
-            start_dt = parse_date(start_date)
-        else:
-            # FIXME: Ugly vibe-coded approach to handle very old messages. Fix it
-            # Default to beginning of Telegram (or a very early date)
-            start_dt = datetime(2013, 1, 1, tzinfo=timezone.utc)
-
-        if end_date:
-            end_dt = parse_date(end_date)
-        else:
-            # Default to current time
-            end_dt = datetime.now(timezone.utc)
-
-        if start_dt >= end_dt:
-            raise HTTPException(
-                status_code=400, detail="start_date must be before end_date"
+    async def stream():
+        try:
+            report = await sync_dialog(
+                client,
+                archive,
+                entity,
+                config.settings,
+                config.media_dir,
+                since=start,
+                refresh=False,
+                media=False,
+            )
+            peer = functools.cache(archive.peer)
+            count = incomplete = 0
+            low = int(start.timestamp()) if start else 0
+            for rows in archive.read(
+                did, low, int(end.timestamp()), not reverse, chunk_size
+            ):
+                messages = [
+                    _with_file(serialize_row(r, peer), r, config.media_dir)
+                    for r in rows
+                ]
+                count += len(messages)
+                incomplete += sum("incomplete" in m for m in messages)
+                yield sse({"messages": messages})
+            yield sse(
+                {"count": count, "incomplete": incomplete, "sync": asdict(report)},
+                "done",
+            )
+        except Exception as e:
+            logger.exception("History stream for %s failed", did)
+            if isinstance(e, SESSION_LOST):
+                await request.app.state.telegram.reset()
+            yield sse(
+                {
+                    "error": f"{type(e).__name__}: {e}",
+                    "retry_after": getattr(e, "seconds", None),
+                },
+                "error",
             )
 
-        # Ensure dialog directory structure and initialize database
-        paths = ensure_dialog_directories(config.dialogs_dir, dialog_id)
-
-        # Create engine and tables
-        engine = get_engine(paths.db_file, check_same_thread=False)
-        create_db_and_tables(engine)
-
-        # Upsert dialog info
-        try:
-            entity = await client.get_entity(dialog_id)
-            dialog_name = getattr(entity, "title", None) or str(dialog_id)
-            dialog_username = getattr(entity, "username", None)
-
-            with get_session(paths.db_file, check_same_thread=False) as session:
-                operations.upsert_dialog(
-                    session,
-                    dialog_id=str(dialog_id),
-                    name=dialog_name,
-                    username=dialog_username,
-                )
-        except Exception as e:
-            logger.warning(f"Could not update dialog info: {e}")
-
-        batch_size = chunk_size
-
-        async def event_stream():
-            with get_session(paths.db_file, check_same_thread=False) as session:
-                try:
-                    async for batch in stream_messages_with_cache(
-                        client,
-                        session,
-                        dialog_id,
-                        start_dt,
-                        end_dt,
-                        settings=config.settings,
-                        client_batch_size=batch_size,
-                        force_refresh=force_refresh,
-                        output_dir=config.dialogs_dir,
-                        reverse=reverse,
-                    ):
-                        yield f"data: {json.dumps({'messages': batch})}\n\n"
-                finally:
-                    # Session cleanup happens automatically with context manager
-                    pass
-
-        return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-    except HTTPException:
-        raise
-    except FloodWaitError as e:
-        logger.error("Telegram rate limit in get_history: retry-after %ds", e.seconds)
-        raise HTTPException(
-            status_code=429,
-            detail=f"Telegram rate limit exceeded. Retry after {e.seconds} seconds.",
-            headers={"Retry-After": str(e.seconds)},
-        )
-    except Exception as e:
-        logger.error(f"Error in get_history: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
-class SyncReport(BaseModel):
-    """Summary returned after POST /sync — fills cache for Telegram gaps only."""
-
-    dialog_id: int
-    messages_downloaded: int
-    messages_with_media: int
-    media_downloaded: int
-    media_skipped: int
+def _with_file(message: dict, row, media_dir) -> dict:
+    """Add `media_file` (relative to {data_dir}/media) for a downloaded file.
+    A file the archive calls downloaded but that is gone from disk is flagged, not hidden."""
+    if row["media_status"] == "downloaded":
+        if (media_dir / row["media_path"]).is_file():
+            message["media_file"] = row["media_path"]
+        else:
+            message.update(media_status="missing", incomplete="media_missing_on_disk")
+    return message
 
 
 @router.post(
     "/sync/{dialog_id}",
-    response_model=SyncReport,
-    summary="Sync dialog gaps into local cache",
+    summary="Sync a dialog into the local archive",
     description="""
-Download missing messages from Telegram into the local cache (SQLite + media)
-for the requested date range. Does not return message bodies — use
-`GET /history/{dialog_id}` to read them.
-
-Parameters match the history endpoint: optional `start_date` (default beginning
-of Telegram), `end_date` (default now), and `force_refresh` to bypass cache.
-
-Response counts only messages fetched from Telegram in this call (not rows
-served from cache).
-
-This is a **blocking** call — it returns only after downloads finish.
-
-Examples:
-- `POST /api/v3/sync/123` — fill gaps for full range (2013-01-01 .. now)
-- `POST /api/v3/sync/123?start_date=2024-06-01&end_date=2024-12-31`
-- `POST /api/v3/sync/123?force_refresh=true` — re-download range from Telegram
+Archives new messages, extends history back to `since` (default: the whole
+chat), re-reads the last `refresh_days` (setting) to pick up edits, reactions
+and deletions (`full=true`: re-read everything), and downloads media allowed by
+the settings. Returns counts and every problem found (unreadable messages,
+failed downloads). An interrupted sync can simply be called again.
 """,
 )
-async def sync_dialog_endpoint(
-    dialog_id: Annotated[int, Path(description="Dialog ID")],
-    start_date: Annotated[
-        Optional[str],
-        Query(
-            description="Start date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to 2013-01-01"
-        ),
+async def sync_endpoint(
+    dialog_id: DialogId,
+    since: Annotated[
+        str | None,
+        Query(description="Archive back to this date (UTC). Default: whole chat"),
     ] = None,
-    end_date: Annotated[
-        Optional[str],
-        Query(
-            description="End date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS), defaults to now"
-        ),
-    ] = None,
-    force_refresh: Annotated[
-        bool, Query(description="Force re-download even if cached")
+    full: Annotated[
+        bool, Query(description="Re-read every archived message, not only recent ones")
     ] = False,
-    client: TelegramClient = Depends(get_telegram_client),
+    overrides: SettingsUpdate | None = Body(
+        default=None,
+        description="Settings for this call only (same fields as PATCH /settings); "
+        "nothing is saved. Media skipped now is re-checked by later syncs.",
+    ),
+    client=Depends(get_client),
+    archive: Archive = Depends(get_archive),
     config: ServerConfig = Depends(get_config),
-) -> SyncReport:
-    """
-    Sync Telegram gaps into the local cache and return a summary.
-
-    Requires X-Telegram-Username header for authentication.
-    """
-    try:
-        if start_date:
-            start_dt = parse_date(start_date)
-        else:
-            start_dt = datetime(2013, 1, 1, tzinfo=timezone.utc)
-
-        if end_date:
-            end_dt = parse_date(end_date)
-        else:
-            end_dt = datetime.now(timezone.utc)
-
-        if start_dt >= end_dt:
-            return SyncReport(
-                dialog_id=dialog_id,
-                messages_downloaded=0,
-                messages_with_media=0,
-                media_downloaded=0,
-                media_skipped=0,
-            )
-
-        paths = ensure_dialog_directories(config.dialogs_dir, dialog_id)
-        engine = get_engine(paths.db_file, check_same_thread=False)
-        create_db_and_tables(engine)
-
-        # Upsert dialog info
-        try:
-            entity = await client.get_entity(dialog_id)
-            dialog_name = getattr(entity, "title", None) or str(dialog_id)
-            dialog_username = getattr(entity, "username", None)
-
-            with get_session(paths.db_file, check_same_thread=False) as session:
-                operations.upsert_dialog(
-                    session,
-                    dialog_id=str(dialog_id),
-                    name=dialog_name,
-                    username=dialog_username,
-                )
-        except Exception as e:
-            logger.warning(f"Could not update dialog info: {e}")
-
-        with get_session(paths.db_file, check_same_thread=False) as session:
-            stats = await sync_messages_to_cache(
-                client,
-                session,
-                dialog_id,
-                start_dt,
-                end_dt,
-                settings=config.settings,
-                force_refresh=force_refresh,
-                output_dir=config.dialogs_dir,
-                reverse=True,
-            )
-
-        return SyncReport(
-            dialog_id=dialog_id,
-            messages_downloaded=stats.messages_downloaded,
-            messages_with_media=stats.messages_with_media,
-            media_downloaded=stats.media_downloaded,
-            media_skipped=stats.media_skipped,
-        )
-
-    except HTTPException:
-        raise
-    except FloodWaitError as e:
-        logger.error("Telegram rate limit in sync_dialog: retry-after %ds", e.seconds)
-        raise HTTPException(
-            status_code=429,
-            detail=f"Telegram rate limit exceeded. Retry after {e.seconds} seconds.",
-            headers={"Retry-After": str(e.seconds)},
-        )
-    except Exception as e:
-        logger.error(f"Error in sync_dialog: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+) -> dict:
+    entity = await resolve(client, dialog_id)
+    settings = (
+        apply_update(config.settings, overrides) if overrides else config.settings
+    )
+    report = await sync_dialog(
+        client,
+        archive,
+        entity,
+        settings,
+        config.media_dir,
+        since=parse_date(since, "since"),
+        full=full,
+    )
+    return asdict(report)

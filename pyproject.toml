@@ -1,21 +1,20 @@
 [tool.poetry]
 name = "telegram-scraper-api"
-version = "0.2.0"
-description = "FastAPI server for scraping and caching Telegram messages with smart gap detection"
+version = "0.3.0"
+description = "Local Telegram archive (SQLite + media) with an HTTP API"
 authors = ["Oleksandr Detilie <al.detillier@gmail.com>"]
 readme = "README.md"
 packages = [{include = "telegram_scraper", from = "src"}]
 
 [tool.poetry.dependencies]
 python = ">=3.12,<4.0"
-Telethon = "1.40.0"
+Telethon = "1.46.0"
 qrcode = ">=8.2.0"
 python-dotenv = ">=1.0.0"
 fastapi = ">=0.115.0"
 uvicorn = {extras = ["standard"], version = ">=0.32.0"}
 pyyaml = ">=6.0.0"
 click = ">=8.0.0"
-sqlmodel = "^0.0.32"
 
 [tool.poetry.group.dev.dependencies]
 ruff = ">=0.14.10"
@@ -33,3 +32,7 @@ asyncio_mode = "auto"
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Header", "fastapi.Body"]

@@ -1,378 +1,133 @@
 # Telegram Scraper API
 
-FastAPI-based server for scraping and caching Telegram messages with streaming support.
+A local archive of your Telegram dialogs (SQLite + media files) with an HTTP API,
+built for one Telegram account and for an AI agent (see
+[`TELEGRAM_SCRAPER_SKILL.md`](TELEGRAM_SCRAPER_SKILL.md)).
 
-## Features
+- **Nothing is silently lost.**
+  - The full raw Telegram message is stored.
+  - Anything that cannot be represented or downloaded is flagged `incomplete`
+    on the message and listed in the sync report.
+  - At the end of a full sync, the number of archived messages is checked
+    against Telegram's own count.
+- **No gaps, no duplicates.** Each dialog's archive is one continuous range of
+  message ids. It only grows from its edges, and every batch is written in one
+  transaction. An interrupted sync just continues next time.
+- **Edits, reactions, poll votes and deletions** are picked up by re-reading the
+  last N days on every sync. `full=true` re-reads everything. Deleted messages
+  are kept and marked.
+- **Fully captured:** text with formatting (including link URLs), replies and
+  quotes, forwards, edits, service events (pins, calls, title changes, …),
+  reactions, polls, contacts, locations, web previews, and media metadata and
+  files.
 
-- 🚀 **RESTful API** with FastAPI
-- 📡 **Real-time streaming** via Server-Sent Events (SSE)
-- 💾 **Smart caching** - downloads only missing data, serves cached content instantly
-- 🔄 **Sync endpoint** - fill local cache on demand with download stats
-- 📦 **Chunked delivery** - configurable batch sizes for efficient data transfer
-- 🔐 **Header-based authentication** - simple X-Telegram-Username header
-- 🎯 **Media support** - download and serve media files with UUID-based access
-- 📊 **SQLite caching** - persistent message and media storage with atomic commits
-- ⚙️ **Runtime settings** - adjust download settings on the fly via API
-
-## Quick Start
-
-### Installation
+## Quick start
 
 ```bash
-# Install with Poetry
 poetry install
-
-# Or with pip
-pip install -e .
+cp .env.example .env            # set TELEGRAM_API_ID / TELEGRAM_API_HASH (https://my.telegram.org/apps)
+tgsc-auth myaccount             # log in once (QR code or phone)
+tgsc-server --account myaccount # http://127.0.0.1:8000, docs at /docs
 ```
+
+On first start the server writes a random API token to `data/token`. Every
+request needs it:
+
+```bash
+AUTH="Authorization: Bearer $(cat data/token)"
+curl -s -H "$AUTH" "http://localhost:8000/api/v4/search/dialogs?q=family"
+curl -s -X POST -H "$AUTH" "http://localhost:8000/api/v4/sync/-1001234567890"
+curl -N -s -H "$AUTH" "http://localhost:8000/api/v4/history/-1001234567890?start_date=2024-01-01"
+```
+
+You can also log in through the API (`POST /api/v4/auth/qr`, then poll
+`GET /api/v4/auth/qr/{token}`). See the skill file for the flow.
 
 ### Docker
 
 ```bash
 docker build -t telegram-scraper-server .
-
-docker run -d -p 8000:8000 \
-  -e TELEGRAM_API_ID=YOUR_API_ID \
-  -e TELEGRAM_API_HASH=YOUR_API_HASH \
-  -v ./data:/app/data \
-  telegram-scraper-server
+docker run -d -p 127.0.0.1:8000:8000 \
+  -e TELEGRAM_API_ID=... -e TELEGRAM_API_HASH=... -e TGSC_ACCOUNT=myaccount \
+  -v ./data:/app/data telegram-scraper-server
 ```
 
-Sessions, cached data, and settings are stored in `/app/data` inside the container — mount it to persist across restarts.
+The container runs as uid 1000, so the mounted `data/` directory must be
+writable by that user.
 
-### Prerequisites
+## How it works
 
-Get Telegram API credentials:
-1. Visit https://my.telegram.org/apps
-2. Log in with your phone number
-3. Create a new application
-4. Note your `api_id` and `api_hash`
-
-See [Obtain API id](https://core.telegram.org/api/obtaining_api_id) for more details.
-
-### Setup
-
-**1. Set up credentials:**
-
-```bash
-cp .env.example .env
+```
+POST /sync/{id}      Telegram ──► archive.db + media/      (newer, older, refresh, media)
+GET  /history/{id}   sync the missing part (no refresh, no media) ──► stream from archive.db
+GET  /files/{id}/{message_id}                               archived media file
+GET  /search/...     live Telegram search (same message shape)
 ```
 
-Edit `.env`:
+| Module | Role |
+|---|---|
+| `sync.py` | Brings one dialog's archive up to date (id-based, resumable) |
+| `archive.py` | SQLite storage: raw messages, coverage per dialog, peers, media, problems |
+| `serialize.py` | The **only** place that knows Telegram message shapes: raw → API dict |
+| `media.py` | Media classification from the raw message, atomic downloads |
+| `telegram.py` | The one Telethon client of the process, id resolution |
+| `api/` | FastAPI routes |
 
-```bash
-TELEGRAM_API_ID=YOUR_API_ID
-TELEGRAM_API_HASH=YOUR_API_HASH
-```
-
-**2. Authenticate a user:**
-
-**Option A: CLI (interactive)**
-
-```bash
-tgsc-auth john_doe
-```
-
-Follow the prompts to scan a QR code or enter your phone number.
-
-**Option B: API (web-based QR login)**
-
-Start the server first (step 3), then authenticate via API:
-
-```bash
-# Start a QR login session
-curl -X POST http://localhost:8000/api/v3/auth/qr \
-  -H "Content-Type: application/json" \
-  -d '{"username": "john_doe"}'
-# → {"token": "abc123...", "qr_url": "tg://login?token=...", ...}
-
-# Poll for status (qr_url auto-refreshes every ~25s — re-render it each time)
-curl http://localhost:8000/api/v3/auth/qr/{token}
-# → {"status": "pending", "qr_url": "tg://login?token=FRESH...", ...}
-
-# If 2FA is enabled (status == "password_required"):
-curl -X POST http://localhost:8000/api/v3/auth/qr/{token}/2fa \
-  -H "Content-Type: application/json" \
-  -d '{"password": "your_2fa_password"}'
-```
-
-Render the `qr_url` as a QR code, then scan it in **Telegram → Settings → Devices → Link Desktop Device**.
-
-Use `"force": true` in the POST body to re-authenticate an existing session.
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant S as Server
-    participant T as Telegram
-
-    C->>S: POST /auth/qr {"username":"john_doe"}
-    S->>T: connect + qr_login()
-    T-->>S: login token
-    S-->>C: {token, qr_url}
-
-    loop Every 2-3s
-        C->>S: GET /auth/qr/{token}
-        S-->>C: {status: pending, qr_url}
-    end
-
-    Note over S,T: Background: recreate() every ~25s to keep QR fresh
-
-    Note over C: User scans QR on phone
-    T-->>S: scan confirmed
-
-    alt 2FA enabled
-        C->>S: GET /auth/qr/{token}
-        S-->>C: {status: password_required}
-        C->>S: POST /auth/qr/{token}/2fa {"password":"***"}
-        S->>T: sign_in(password)
-        T-->>S: authorized
-        S-->>C: {status: success}
-    else No 2FA
-        C->>S: GET /auth/qr/{token}
-        S-->>C: {status: success}
-    end
-
-    Note over C,S: Session saved. Use X-Telegram-Username header for all API calls.
-```
-
-**3. Start the server:**
-
-```bash
-tgsc-server
-```
-
-**4. Test the API:**
-
-```bash
-# Find channels
-curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v3/search/dialogs?q=telegram"
-
-# Get message history
-curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v3/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&chunk_size=250"
-
-# Sync a dialog into local cache
-curl -X POST -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v3/sync/-1001234567890?start_date=2024-01-01"
-
-# Search messages across all chats
-curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v3/search/messages?q=hello"
-
-# Download media
-curl -H "X-Telegram-Username: john_doe" \
-  "http://localhost:8000/api/v3/files/abc-123-uuid" -o photo.jpg
-```
-
-Visit `http://localhost:8000/docs` for interactive API documentation.
+The message format, every endpoint and all error codes are documented in
+[`TELEGRAM_SCRAPER_SKILL.md`](TELEGRAM_SCRAPER_SKILL.md) and at `/docs`.
 
 ## Configuration
 
-The configuration is retrieved from three distinct sources:
-- environment variables;
-- CLI parameters;
-- yaml file with server settings;
-
-| What | Source | How to change |
-|------|--------|---------------|
-| `api_id`, `api_hash` | `.env` / environment variables | Edit `.env`, restart |
-| `data_dir` | CLI `--data-dir` | `tgsc-server --data-dir ./my-data` |
-| `host`, `port` | CLI `--host` / `--port` | `tgsc-server --port 9000` |
-| `download_media`, `max_media_size_mb`, `telegram_batch_size`, `repair_media`, `download_file_types` | `settings.yaml` in data dir | API or edit file |
-
-### Data Directory Layout
+| What | Where |
+|---|---|
+| `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | environment or `.env` |
+| account, data dir, host, port | `tgsc-server --account NAME --data-dir ./data --host 127.0.0.1 --port 8000` (`TGSC_ACCOUNT` env works too) |
+| `download_media`, `max_media_size_mb`, `telegram_batch_size`, `refresh_days`, `download_file_types` | `data/settings.yaml`, or `PATCH /api/v4/settings` |
 
 ```
-data/                     ← --data-dir (default ./data)
-├── sessions/             ← Telegram session files
-├── channels/             ← Per-channel SQLite databases + media
-│   ├── -1001234567890/
-│   │   ├── -1001234567890.db
-│   │   └── media/
-│   └── ...
-└── settings.yaml         ← Runtime settings (auto-created on first run)
+data/
+├── token          API token (created on first start, mode 600)
+├── settings.yaml
+├── sessions/      Telethon session files
+├── archive.db     all archived messages
+└── media/<dialog_id>/<message_id>-<name>
 ```
 
-### Runtime Settings
+One data directory belongs to one Telegram account. The archive refuses a
+session of a different account, because private-chat message ids are per account.
 
-Settings are stored in `{data_dir}/settings.yaml` and can be changed at runtime via the API:
+## Checking export fidelity
+
+Export a chat from Telegram Desktop (JSON), sync the same chat, and compare:
 
 ```bash
-# Get current settings
-curl -H "X-Telegram-Username: john_doe" \
-  http://localhost:8000/api/v3/settings
-
-# Update settings
-curl -X PATCH http://localhost:8000/api/v3/settings \
-  -H "X-Telegram-Username: john_doe" \
-  -H "Content-Type: application/json" \
-  -d '{"download_media": false, "max_media_size_mb": 50}'
+python scripts/compare_with_native_export.py ./data -1001234567890 "path/to/ChatExport (Chat)"
 ```
 
-Changes take effect immediately and are saved to `settings.yaml`.
-
-You can also import a settings file on startup:
-
-```bash
-# Import a settings template (overwrites existing settings.yaml in data dir)
-tgsc-server --settings ./my-settings.yaml
-```
-
-### CLI Reference
-
-```bash
-# Server
-tgsc-server --help
-tgsc-server                                    # defaults: ./data, 0.0.0.0:8000
-tgsc-server --data-dir ./project --port 9000   # custom data dir and port
-tgsc-server --settings ./template.yaml         # import settings template
-
-# Authentication
-tgsc-auth --help
-tgsc-auth john_doe                             # authenticate with default data dir
-tgsc-auth john_doe --data-dir ./project        # custom data dir
-```
-
-## API Endpoints
-
-### 1. Search Dialogs
-
-```http
-GET /api/v3/search/dialogs?q={query}
-Header: X-Telegram-Username: your_username
-```
-
-Search for channels, groups, and users. Use the `q` query parameter for the search term (e.g. `?q=telegram`). Optional filters: `type`, `is_archived`, `min_participants`, `max_participants`, `last_message_after`, `last_message_before`, `limit`, `offset`, and more. See `/docs` for full parameters.
-
-### 2. List Folders
-
-```http
-GET /api/v3/folders
-GET /api/v3/folders?include_dialogs=true
-Header: X-Telegram-Username: your_username
-```
-
-List custom Telegram folders only (built-in All Chats/Archive are excluded). Use `include_dialogs=true` to include each folder’s explicitly added dialogs (id and title). Useful to get dialog IDs in a folder, then use search/history with those IDs.
-
-### 3. Message History
-
-```http
-GET /api/v3/history/{channel_id}?start_date={date}&end_date={date}&chunk_size={size}
-Header: X-Telegram-Username: your_username
-```
-
-Stream message history with smart caching:
-- `chunk_size=250` - Stream in chunks (Server-Sent Events)
-- `force_refresh=true` - Bypass cache and re-download
-- `reverse=true` (default) - Oldest-first; `reverse=false` - Newest-first
-
-### 4. Sync Dialog
-
-```http
-POST /api/v3/sync/{dialog_id}?start_date={date}&end_date={date}
-Header: X-Telegram-Username: your_username
-```
-
-Download missing messages from Telegram into the local cache (SQLite + media) for the requested date range. Returns a summary instead of message bodies — use `GET /history` to read the cached data afterwards.
-
-- `start_date` / `end_date` - Optional, defaults to full range (2013-01-01 to now)
-- `force_refresh=true` - Bypass cache, re-download everything from Telegram
-
-Response:
-
-```json
-{
-  "dialog_id": -1001234567890,
-  "messages_downloaded": 1423,
-  "messages_with_media": 87,
-  "media_downloaded": 52,
-  "media_skipped": 35
-}
-```
-
-### 5. Search Messages
-
-```http
-GET /api/v3/search/messages?q={query}
-GET /api/v3/search/messages/{dialog_id}?q={query}
-Header: X-Telegram-Username: your_username
-```
-
-Search for messages containing specific words or phrases. Use the `q` query parameter for the search term. Searches Telegram directly — no pre-caching required.
-- Global search: omit `dialog_id` to search across all chats (`messages.searchGlobal`)
-- Per-dialog search: include `dialog_id` to search within a specific chat (`messages.search`)
-- Optional filters: `start_date`, `end_date`, `from_user` (per-dialog only), `limit`
-
-### 6. Media Files
-
-```http
-GET /api/v3/files/{uuid}
-Header: X-Telegram-Username: your_username
-```
-
-Download media file by UUID (provided in message response).
-
-### 7. Settings
-
-```http
-GET /api/v3/settings
-PATCH /api/v3/settings
-Header: X-Telegram-Username: your_username
-```
-
-Read and update runtime settings. Defaults: `download_media` true, `max_media_size_mb` 20, `telegram_batch_size` 100, `repair_media` true, `download_file_types` (photos, videos, voice_messages, video_messages, stickers, gifs, files) all true.
-
-## Documentation
-
-**[Interactive API Docs](http://localhost:8000/docs)** - Swagger UI (when server is running)
+It prints mismatch counts per field (no message content).
 
 ## Development
 
-### Check linting
-
 ```bash
+pytest            # tests use a fake Telegram built from real Telethon objects
 ruff check src/
 ```
 
-## Troubleshooting
+## Known limits
 
-### "User not authenticated"
-
-Authenticate first:
-
-```bash
-tgsc-auth your_username
-```
-
-### "Missing X-Telegram-Username header"
-
-All API requests require this header:
-
-```bash
-curl -H "X-Telegram-Username: your_username" ...
-```
-
-### "Missing Telegram API credentials"
-
-Set credentials in `.env`:
-
-```bash
-cp .env.example .env
-# Edit .env with your api_id and api_hash
-```
-
-### Port already in use
-
-```bash
-tgsc-server --port 9000
-```
+- **Rich posts** (Telegram's structured messages with headings and lists) are
+  archived complete in the raw message. The API returns them as plain text
+  (`rich_text`), with the structure flattened. Files embedded in a rich post are
+  not downloaded and are flagged.
+- **New Telegram features.** Content that the pinned Telethon version cannot read
+  arrives as an empty placeholder, flagged `unsupported_by_telegram_library`.
+  Upgrading Telethon fixes this: the rich posts were invisible with 1.40 and are
+  complete with 1.46.
+- **Old edits and deletions.** Edits and deletions older than `refresh_days` are
+  only seen with `POST /sync/{id}?full=true`.
+- **History is "from a date until now".** A dialog cannot be archived as an
+  isolated middle window.
 
 ## License
 
-[MIT License](LICENSE)
-
-## Acknowledgement
-
-Built based on: https://github.com/unnohwn/telegram-scraper
+[MIT License](LICENSE). Originally based on https://github.com/unnohwn/telegram-scraper

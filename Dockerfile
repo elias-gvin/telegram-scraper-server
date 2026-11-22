@@ -28,14 +28,18 @@ WORKDIR /app
 COPY --from=builder /app/.venv .venv
 COPY --from=builder /app/src src
 
-# Put virtualenv on PATH
+# Run as an unprivileged user; /app/data holds sessions, archive, media and the API token
+RUN useradd --create-home --uid 1000 scraper && mkdir -p /app/data && chown scraper /app/data
+USER scraper
+
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Telegram credentials must be provided via env vars at runtime:
-#   -e TELEGRAM_API_ID=... -e TELEGRAM_API_HASH=...
+# Required at runtime:
+#   -e TELEGRAM_API_ID=... -e TELEGRAM_API_HASH=... -e TGSC_ACCOUNT=<session name>
 
 EXPOSE 8000
 
 ENTRYPOINT ["tgsc-server"]
-# Default: data directory at /app/data (mount as volume to persist)
-CMD ["--data-dir", "/app/data"]
+# Inside a container the server must listen on all interfaces; publish the port
+# on the host's loopback only: -p 127.0.0.1:8000:8000
+CMD ["--host", "0.0.0.0", "--data-dir", "/app/data"]
