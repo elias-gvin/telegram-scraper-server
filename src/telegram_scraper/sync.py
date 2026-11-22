@@ -32,7 +32,7 @@ from telethon.tl.types import Channel
 from . import media as media_files
 from .archive import Archive, dump_raw
 from .config import RuntimeSettings
-from .serialize import incomplete, iso
+from .serialize import SERIALIZER_ERROR, check, iso
 from .telegram import peer_fields, resolve, title_of
 
 logger = logging.getLogger(__name__)
@@ -183,17 +183,29 @@ async def _save(ctx: _Context, messages) -> list[int]:
         for pid, fields in peers.items():
             ctx.archive.save_peer(pid, **fields)
         for msg in messages:
-            raw = dump_raw(msg)
+            raw = _raw_json(msg)
             ctx.archive.save_message(
                 ctx.dialog_id, msg.id, int(msg.date.timestamp()), msg.sender_id, raw
             )
             data = json.loads(raw)
+            problem = check(data)
+            ctx.archive.set_problem(ctx.dialog_id, msg.id, problem)
+            if problem and problem.startswith(SERIALIZER_ERROR):
+                continue  # don't let the same bug break the media step too
             if info := media_files.media_info(data.get("media")):
                 ctx.archive.expect_media(ctx.dialog_id, msg.id, info.key)
-            ctx.archive.set_problem(ctx.dialog_id, msg.id, incomplete(data))
         ids = [m.id for m in messages]
         ctx.archive.extend_coverage(ctx.dialog_id, min(ids), max(ids))
     return ids
+
+
+def _raw_json(msg) -> str:
+    """The message as JSON; if that fails, a stub that keeps its id and the error."""
+    try:
+        return dump_raw(msg)
+    except Exception as e:  # noqa: BLE001 -- flagged as incomplete, sync continues
+        stub = {"_": "Unserializable", "id": msg.id, "date": int(msg.date.timestamp())}
+        return json.dumps({**stub, "error": f"{type(e).__name__}: {e}"})
 
 
 async def _peers(ctx: _Context, messages) -> dict[int, dict]:

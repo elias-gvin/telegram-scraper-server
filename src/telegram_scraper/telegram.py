@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from telethon import TelegramClient, utils
+from telethon.errors import AuthKeyDuplicatedError, UnauthorizedError
 
 ACCOUNT_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
@@ -17,6 +18,10 @@ class NotAuthorized(RuntimeError):
 
 class DialogNotFound(LookupError):
     pass
+
+
+# Telegram errors meaning the session is no longer valid (revoked, logged out, ...).
+SESSION_LOST = (UnauthorizedError, AuthKeyDuplicatedError)
 
 
 def check_account_name(name: str) -> str:

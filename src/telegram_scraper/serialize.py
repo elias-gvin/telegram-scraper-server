@@ -92,6 +92,10 @@ def _text(value) -> str:
 
 def incomplete(raw: dict, media_status: str | None = None) -> str | None:
     """Why this message is not fully archived, or None. Also used by sync to report problems."""
+    if (
+        raw["_"] == "Unserializable"
+    ):  # see sync.py: the Telethon object could not be stored
+        return f"raw_error: {raw['error']}"
     media = raw.get("media")
     kind = media and media["_"]
     if kind == "MessageMediaUnsupported":
@@ -147,15 +151,34 @@ def serialize(
     return out
 
 
+SERIALIZER_ERROR = "serializer_error"
+
+
+def check(raw: dict) -> str | None:
+    """The problem `serialize()` would report for this message, including its own crash."""
+    try:
+        serialize(raw, None, lambda _: None)
+    except Exception as e:  # noqa: BLE001 -- reported, never hides the message
+        return f"{SERIALIZER_ERROR}: {type(e).__name__}: {e}"
+    return incomplete(raw)
+
+
 def serialize_row(row, peer: PeerLookup) -> dict:
-    """An `Archive.read()` row -> API dict."""
-    return serialize(
-        json.loads(row["raw"]),
-        row["sender_id"],
-        peer,
-        row["media_status"],
-        bool(row["deleted"]),
-    )
+    """An `Archive.read()` row -> API dict. A message this code cannot handle is still
+    returned (flagged `incomplete`) instead of breaking the whole stream."""
+    raw = json.loads(row["raw"])
+    try:
+        return serialize(
+            raw, row["sender_id"], peer, row["media_status"], bool(row["deleted"])
+        )
+    except Exception as e:  # noqa: BLE001 -- see check(); the raw message is kept
+        return {
+            "message_id": raw.get("id"),
+            "date": iso(raw.get("date")),
+            "type": "message",
+            "message": raw.get("message") or "",
+            "incomplete": f"{SERIALIZER_ERROR}: {type(e).__name__}: {e}",
+        }
 
 
 def _forward(fwd: dict | None, peer: PeerLookup) -> dict:

@@ -30,7 +30,13 @@ from .config import (
     load_settings,
     resolve_settings_file,
 )
-from .telegram import DialogNotFound, NotAuthorized, TelegramHolder, check_account_name
+from .telegram import (
+    SESSION_LOST,
+    DialogNotFound,
+    NotAuthorized,
+    TelegramHolder,
+    check_account_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +89,23 @@ def create_app(config: ServerConfig, telegram: TelegramHolder | None = None) -> 
     @app.exception_handler(AccountMismatch)
     async def account_mismatch(_: Request, e: AccountMismatch):
         return error(409, str(e))
+
+    async def session_lost(_: Request, e: Exception):
+        await (
+            app.state.telegram.reset()
+        )  # drop the dead client; the next request reconnects
+        return error(
+            401,
+            f"Telegram session is no longer authorized ({type(e).__name__}): log in again",
+        )
+
+    for exc in SESSION_LOST:
+        app.add_exception_handler(exc, session_lost)
+
+    @app.exception_handler(Exception)
+    async def unexpected(_: Request, e: Exception):
+        logger.exception("Unhandled error")
+        return error(500, f"{type(e).__name__}: {e}")
 
     @app.exception_handler(FloodWaitError)
     async def flood_wait(_: Request, e: FloodWaitError):

@@ -11,7 +11,7 @@ from telegram_scraper.config import MediaCategory
 from telegram_scraper.media import MediaInfo, download
 from telegram_scraper.server import create_app
 
-from .conftest import API, TOKEN
+from .conftest import API, TOKEN, FakeHolder
 from .fake_telegram import ALICE, BOB, CHANNEL, photo, text_msg
 
 CHAT = -1000000005000  # CHANNEL, marked id
@@ -253,3 +253,96 @@ async def test_archive_of_another_account_is_refused(server_config, tg, monkeypa
     ) as c:
         resp = await c.post(f"{API}/sync/{CHAT}")
     assert resp.status_code == 409 and "424242" in resp.json()["detail"]
+
+
+# --- failures ------------------------------------------------------------------
+
+
+async def test_one_broken_message_does_not_break_sync_or_history(
+    client, tg, monkeypatch
+):
+    """A message our code cannot handle is flagged and reported; everything else flows."""
+    import sys
+
+    serialize_module = sys.modules["telegram_scraper.serialize"]
+    sync_module = sys.modules["telegram_scraper.sync"]
+
+    real_dump, real_forward = sync_module.dump_raw, serialize_module._forward
+
+    def dump(msg):  # storing message 3 fails
+        if msg.id == 3:
+            raise TypeError("cannot store this")
+        return real_dump(msg)
+
+    def forward(fwd, peer):  # rendering message 7 fails (it is forwarded)
+        if fwd:
+            raise KeyError("surprise")
+        return real_forward(fwd, peer)
+
+    from telethon.tl import types as t
+
+    tg.edit(CHANNEL, 7, fwd_from=t.MessageFwdHeader(date=day(1), from_name="X"))
+    monkeypatch.setattr(sync_module, "dump_raw", dump)
+    monkeypatch.setattr(serialize_module, "_forward", forward)
+
+    report = (await client.post(f"{API}/sync/{CHAT}")).json()
+    problems = {p["message_id"]: p["problem"] for p in report["problems"]}
+    assert problems[3] == "raw_error: TypeError: cannot store this"
+    assert problems[7].startswith("serializer_error: KeyError")
+
+    evts = await history(client)
+    assert evts[-1][0] == "done" and evts[-1][1]["count"] == 10
+    got = {m["message_id"]: m for e, d in evts if e == "data" for m in d["messages"]}
+    assert got[3]["incomplete"].startswith("raw_error") and got[7][
+        "incomplete"
+    ].startswith("serializer_error")
+    assert got[8]["message"] == "message 8"
+
+
+async def test_unexpected_error_returns_its_type_and_message(app, tg, monkeypatch):
+    from httpx import ASGITransport, AsyncClient
+
+    async def boom(*a, **kw):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(tg, "get_entity", boom)
+    # The server sends the 500 response, then re-raises for its log; don't re-raise here.
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    ) as c:
+        resp = await c.post(f"{API}/sync/{CHAT}")
+    assert (
+        resp.status_code == 500
+        and resp.json()["detail"] == "RuntimeError: disk on fire"
+    )
+
+
+async def test_revoked_session_is_401_and_drops_the_client(server_config, tg):
+    from httpx import ASGITransport, AsyncClient
+    from telethon.errors import AuthKeyUnregisteredError
+
+    class Holder(FakeHolder):
+        resets = 0
+
+        async def reset(self):
+            Holder.resets += 1
+
+    async def revoked(*a, **kw):
+        raise AuthKeyUnregisteredError(request=None)
+        yield  # pragma: no cover
+
+    tg.iter_messages = revoked
+    app = create_app(server_config, telegram=Holder(tg))
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    ) as c:
+        resp = await c.post(f"{API}/sync/{CHAT}")
+        assert resp.status_code == 401 and "log in again" in resp.json()["detail"]
+        evts = events((await c.get(f"{API}/history/{CHAT}")).text)
+    assert evts[-1][0] == "error" and "AuthKeyUnregistered" in evts[-1][1]["error"]
+    assert Holder.resets == 2

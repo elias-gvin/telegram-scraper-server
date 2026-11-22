@@ -9,7 +9,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import StreamingResponse
 from telethon import utils
 
@@ -17,7 +17,7 @@ from ..archive import Archive
 from ..config import ServerConfig
 from ..serialize import serialize_row
 from ..sync import sync_dialog
-from ..telegram import resolve
+from ..telegram import SESSION_LOST, resolve
 from .deps import get_archive, get_client, get_config, parse_date
 
 router = APIRouter(tags=["history"])
@@ -53,6 +53,7 @@ for edits, reactions, deletions and media files.
 """,
 )
 async def get_history(
+    request: Request,
     dialog_id: DialogId,
     start_date: Annotated[
         str | None, Query(description="Inclusive, UTC. Default: beginning of the chat")
@@ -105,6 +106,8 @@ async def get_history(
             )
         except Exception as e:
             logger.exception("History stream for %s failed", did)
+            if isinstance(e, SESSION_LOST):
+                await request.app.state.telegram.reset()
             yield sse(
                 {
                     "error": f"{type(e).__name__}: {e}",
