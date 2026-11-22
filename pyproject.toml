@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "telegram-scraper-api"
-version = "0.2.0"
-description = "FastAPI server for scraping and caching Telegram messages with smart gap detection"
+version = "0.3.0"
+description = "Local Telegram archive (SQLite + media) with an HTTP API"
 authors = ["Oleksandr Detilie <al.detillier@gmail.com>"]
 readme = "README.md"
 packages = [{include = "telegram_scraper", from = "src"}]

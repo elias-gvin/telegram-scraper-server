@@ -1,545 +1,297 @@
 ---
 name: telegram-scraper
-description: Access Telegram message history via a local API server (localhost:8000). Use when user asks to search Telegram dialogs, retrieve messages, list folders, download media, or analyze Telegram conversations.
+description: Access Telegram message history via a local API server (localhost:8000). Use when user asks to search Telegram dialogs, retrieve or archive messages, list folders, download media, or analyze Telegram conversations.
 ---
 
-# Telegram Scraper API
+# Telegram Scraper API (v4)
 
-Local FastAPI server providing authenticated access to Telegram message history, dialog search, media files, and folder management. Base URL: `http://localhost:8000`
+A local FastAPI server for **one** Telegram account. It keeps a local archive
+(SQLite + media files) of the dialogs you read or sync, and serves it over HTTP.
+Base URL: `http://localhost:8000/api/v4`.
 
 ## Security
 
-**NEVER save or persist** the user's Telegram API ID, API Hash, or 2FA password. Request credentials on-the-fly and pass them directly to commands.
-
-## Rate Limiting (FloodWaitError)
-
-Telegram rate-limits aggressive API usage. The server's Telethon client auto-sleeps up to **120 seconds** on `FloodWaitError`. If a `429` response is returned:
-
-1. **Notify the user** with the wait time from the `Retry-After` header
-2. Suggest reducing `chunk_size` (50–100) or lowering `telegram_batch_size` via `/api/v3/settings`
-
-All `429` responses follow this format:
-
-```json
-{"detail": "Telegram rate limit exceeded. Retry after 42 seconds."}
-```
-
-## Server Setup
-
-### 1. Check if running
+- **NEVER save or persist** the user's Telegram API ID, API hash or 2FA password.
+  Ask for them when needed and pass them directly to commands.
+- Every `/api/v4/...` request needs `Authorization: Bearer $TOKEN`. The token
+  is created on the server's first start, in `{data_dir}/token`:
 
 ```bash
-curl -s http://localhost:8000/health
-# → {"status": "healthy"}
+TOKEN=$(cat ./data/token)          # bare metal
+TOKEN=$(docker exec telegram-scraper cat /app/data/token)   # Docker
+AUTH="Authorization: Bearer $TOKEN"
 ```
 
-### 2. Launch the server
+## Rate limiting
 
-Ask the user for Telegram API credentials from https://my.telegram.org/apps.
+Telethon sleeps automatically on Telegram flood waits of up to 120 s. Longer
+waits return `429` with a `Retry-After` header (inside a history stream: an
+`error` event with `retry_after`). If that happens, tell the user the wait time,
+then retry.
+
+## Server setup
+
+### 1. Check if it is running
+
+```bash
+curl -s http://localhost:8000/health    # → {"status": "healthy"}   (no token needed)
+```
+
+### 2. Launch
+
+Ask the user for API credentials from https://my.telegram.org/apps and for the
+**account name** (the session name chosen at login, e.g. `odetilie`).
 
 **Docker:**
 
 ```bash
-# Load image if needed (adjust path to your .tar location)
-docker images | grep -q telegram-scraper || \
-  docker load < /path/to/telegram-scraper-latest.tar
-
-# Start (or restart existing container)
-if docker ps -a --format '{{.Names}}' | grep -q '^telegram-scraper$'; then
-  docker start telegram-scraper
-else
-  mkdir -p /root/telegram-scraper-data
-  docker run -d -p 8000:8000 \
-    -e TELEGRAM_API_ID=USER_PROVIDED_API_ID \
-    -e TELEGRAM_API_HASH=USER_PROVIDED_API_HASH \
-    -v /root/telegram-scraper-data:/app/data \
-    --name telegram-scraper \
-    telegram-scraper:latest
-fi
+mkdir -p /root/telegram-scraper-data
+docker run -d -p 127.0.0.1:8000:8000 \
+  -e TELEGRAM_API_ID=USER_PROVIDED_API_ID \
+  -e TELEGRAM_API_HASH=USER_PROVIDED_API_HASH \
+  -e TGSC_ACCOUNT=ACCOUNT_NAME \
+  -v /root/telegram-scraper-data:/app/data \
+  --name telegram-scraper telegram-scraper:latest
 ```
 
-**Bare-metal (Poetry):**
+**Bare metal:**
 
 ```bash
-export TELEGRAM_API_ID=USER_PROVIDED_API_ID
-export TELEGRAM_API_HASH=USER_PROVIDED_API_HASH
-tgsc-server --data-dir ./data --port 8000
+export TELEGRAM_API_ID=USER_PROVIDED_API_ID TELEGRAM_API_HASH=USER_PROVIDED_API_HASH
+tgsc-server --account ACCOUNT_NAME --data-dir ./data --port 8000
 ```
 
-### 3. QR Code Authentication
+### 3. Log in (only once per account)
 
-**Start QR login:**
+Either run `tgsc-auth ACCOUNT_NAME --data-dir ./data` in a terminal (interactive),
+or use QR login over the API:
 
 ```bash
-curl -s -X POST http://localhost:8000/api/v3/auth/qr \
-  -H "Content-Type: application/json" \
-  -d '{"username": "SESSION_NAME"}'
+curl -s -X POST -H "$AUTH" http://localhost:8000/api/v4/auth/qr
+# → {"token": "<qr-session>", "qr_url": "tg://login?token=...", "message": "..."}
 ```
 
-Response: `{"token": "abc123...", "qr_url": "tg://login?token=...", "message": "..."}`
+- Add `-H "Content-Type: application/json" -d '{"force": true}'` to replace an
+  existing session (otherwise `409`).
+- Render `qr_url` as a QR image for the user: Telegram → Settings → Devices →
+  Link Desktop Device.
+- Poll every 2–3 s: `curl -s -H "$AUTH" http://localhost:8000/api/v4/auth/qr/<qr-session>`.
+  - `status`: `pending` (re-render `qr_url`, it refreshes every ~25 s) |
+    `password_required` | `success` | `expired` | `error`.
+- 2FA: `curl -s -X POST -H "$AUTH" -H "Content-Type: application/json" -d '{"password": "..."}' .../auth/qr/<qr-session>/2fa`.
+- Cancel: `curl -X DELETE -H "$AUTH" .../auth/qr/<qr-session>`.
 
-Use `{"username": "SESSION_NAME", "force": true}` to re-authenticate an existing session (otherwise returns `409` if session file already exists).
-
-**Send the QR code to the user** — render `qr_url` as a QR image. Instruct them: Telegram → Settings → Devices → Link Desktop Device → Scan.
-
-**Poll for status** (every 2–3s; `qr_url` auto-refreshes every ~25s — re-render each time):
-
-```bash
-curl -s http://localhost:8000/api/v3/auth/qr/$TOKEN
-```
-
-Response: `{"status": "pending|password_required|success|expired|error", "username": "...", "qr_url": "...", "error": null, "message": "..."}`
-
-- `pending` → keep polling, re-render `qr_url` if changed
-- `password_required` → submit 2FA (see below)
-- `success` → done, session saved
-- `expired` / `error` → start over with POST
-
-**Submit 2FA password** (only when status is `password_required`):
-
-```bash
-curl -s -X POST http://localhost:8000/api/v3/auth/qr/$TOKEN/2fa \
-  -H "Content-Type: application/json" \
-  -d '{"password": "USER_2FA_PASSWORD"}'
-```
-
-**Cancel a pending QR session:**
-
-```bash
-curl -X DELETE http://localhost:8000/api/v3/auth/qr/$TOKEN
-```
-
-### 4. Verify authentication
-
-```bash
-curl -s -H "X-Telegram-Username: SESSION_NAME" \
-  "http://localhost:8000/api/v3/search/dialogs?limit=3"
-```
-
-Sessions persist in `{data_dir}/sessions/` and survive server restarts.
+A `401` saying the session is not authorized means the login must be redone.
 
 ---
 
-## API Reference
+## Dialog ids
 
-All endpoints require the `X-Telegram-Username` header with the session name used during authentication.
+All dialog ids are **marked ids**, exactly as `/search/dialogs` returns them:
+channels and supergroups are `-100…`, basic groups are `-…`, and users are
+positive. Bare ids (without the `-100` prefix) are not accepted.
 
-### 1. Search Dialogs
+## API reference
 
-`GET /api/v3/search/dialogs`
+### 1. Search dialogs — `GET /search/dialogs`
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `q` | string | — | Search query on dialog title (omit for all) |
-| `match` | enum | `fuzzy` | `fuzzy` (scored) or `exact` (substring) |
-| `min_score` | float | `0.8` | Fuzzy score threshold (0.0–1.0) |
-| `type` | enum[] | — | `user`, `group`, `supergroup`, `channel`, `bot`, `saved`, `me`. Repeat for multiple: `?type=group&type=supergroup` |
-| `is_archived` | bool | — | Filter by archive status |
-| `min_messages` | int | — | Minimum message count |
-| `max_messages` | int | — | Maximum message count |
-| `min_participants` | int | — | Minimum participant count |
-| `max_participants` | int | — | Maximum participant count |
-| `last_message_after` | date | — | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` |
-| `last_message_before` | date | — | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` |
-| `created_after` | date | — | `YYYY-MM-DD` (channels/groups only) |
-| `created_before` | date | — | `YYYY-MM-DD` (channels/groups only) |
-| `is_creator` | bool | — | Only dialogs you created |
-| `has_username` | bool | — | Only dialogs with/without public @username |
-| `is_verified` | bool | — | Only verified entities |
-| `sort` | enum | `last_message` | `last_message`, `messages`, `title`, `participants`, `unread` |
-| `order` | enum | `desc` | `desc` or `asc` |
-| `limit` | int | `50` | Page size (1–500) |
-| `offset` | int | `0` | Skip N results for pagination |
+| Parameter | Default | Description |
+|---|---|---|
+| `q` | — | Search on the dialog title (omit for all) |
+| `match` | `fuzzy` | `fuzzy` (scored) or `exact` (substring) |
+| `min_score` | `0.8` | Fuzzy threshold 0.0–1.0 |
+| `type` | — | `user`, `group`, `supergroup`, `channel`, `bot`, `saved` (`me`). Repeatable |
+| `is_archived`, `is_creator`, `has_username`, `is_verified` | — | Boolean filters |
+| `min_messages`, `max_messages` | — | Approximate (by last message id) |
+| `min_participants`, `max_participants` | — | Member count |
+| `last_message_after/_before`, `created_after/_before` | — | `YYYY-MM-DD` |
+| `sort` | `last_message` | `last_message`, `messages` (real counts), `title`, `participants`, `unread` |
+| `order` | `desc` | `desc` / `asc` |
+| `limit`, `offset` | `50`, `0` | Pagination (limit ≤ 500) |
 
-**Response:**
-
-```json
-{
-  "total": 42,
-  "offset": 0,
-  "limit": 50,
-  "results": [
-    {
-      "id": -1001234567890,
-      "type": "channel",
-      "title": "Crypto News",
-      "username": "cryptonews",
-      "is_creator": false,
-      "is_verified": true,
-      "is_archived": false,
-      "message_count": 1523,
-      "unread_count": 5,
-      "participants_count": 45231,
-      "last_message_date": "2024-01-15T14:30:00+00:00",
-      "last_message_preview": "Breaking: Bitcoin hits...",
-      "created_date": "2020-03-10T12:00:00+00:00"
-    }
-  ]
-}
-```
-
-**Examples:**
+Result items: `id` (marked), `type`, `title`, `username`, `is_creator`,
+`is_verified`, `is_archived`, `message_count`, `unread_count`,
+`participants_count`, `last_message_date`, `last_message_preview`,
+`created_date`, and `migrated_to` (for a basic group that was upgraded: the
+supergroup's id).
 
 ```bash
-# Fuzzy search channels
-curl -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/search/dialogs?q=crypto&type=channel&min_score=0.6"
-
-# Groups + supergroups sorted by participants
-curl -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/search/dialogs?type=group&type=supergroup&sort=participants&order=desc"
-
-# Saved Messages
-curl -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/search/dialogs?type=saved"
+curl -s -H "$AUTH" "http://localhost:8000/api/v4/search/dialogs?q=crypto&type=channel&min_score=0.6"
 ```
 
-### 2. List Folders
+### 2. Folders — `GET /folders[?include_dialogs=true]`
 
-`GET /api/v3/folders`
+This returns custom folders only. With `include_dialogs=true`, each folder lists
+its explicitly included dialogs as `{id, title}`.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `include_dialogs` | bool | `false` | If `true`, each folder includes a `dialogs` array (id + title) for explicitly included peers only |
+### 3. Message history — `GET /history/{dialog_id}` (SSE; use `curl -N`)
+
+| Parameter | Default | Description |
+|---|---|---|
+| `start_date` | beginning of the chat | Inclusive, UTC, `YYYY-MM-DD[ HH:MM:SS]` |
+| `end_date` | now | Inclusive, UTC |
+| `chunk_size` | `100` | Messages per event (1–1000) |
+| `reverse` | `true` | `true` = oldest first, `false` = newest first |
+
+What happens: the server first syncs **only the missing part** of the range from
+Telegram into the archive, then streams it from the archive, ordered by message
+id. It does **not** re-read messages it already has and does **not** download
+media. For those, use `POST /sync`.
+
+```
+data: {"messages": [ {...}, ... ]}
+...
+event: done
+data: {"count": 1234, "incomplete": 2, "sync": { ...sync report... }}
+```
+
+or, on failure:
+
+```
+event: error
+data: {"error": "FloodWaitError: ...", "retry_after": 300}
+```
+
+**A stream without a `done` event is incomplete.** Never treat it as the full
+history.
 
 ```bash
-# Folders only
-curl -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/folders"
-
-# Folders with dialog list (id, title) per folder
-curl -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/folders?include_dialogs=true"
+curl -N -s -H "$AUTH" "http://localhost:8000/api/v4/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31"
 ```
 
-Returns only **custom folders** (built-in All Chats/Archive are excluded). User/channel titles: users use first name + last name; channels/groups use `title`.
+#### Message object
 
-**Response (without include_dialogs):**
+Fields that are **always present** (`null` when absent):
 
-```json
-[
-  {"id": 2, "title": "Work"},
-  {"id": 3, "title": "Personal"}
-]
-```
+| Field | Meaning |
+|---|---|
+| `message_id`, `date`, `edit_date` | Dates are ISO 8601 UTC, e.g. `2024-01-15T14:30:00Z`. `edit_date` set = the message was edited |
+| `sender_id`, `first_name`, `last_name`, `username` | Sender. For channel posts, `sender_id` is the channel |
+| `message` | Plain text (`""` if none) |
+| `reply_to`, `reply_quote_text`, `reply_quote_offset` | Reply target id in this chat, and the quoted fragment |
+| `post_author` | Channel post signature |
+| `is_forwarded` (0/1), `forwarded_from_user_id`, `forwarded_from_channel_id`, `forwarded_from_name`, `forwarded_from_date` | Forward origin. Hidden senders only have a name |
+| `media_type`, `media_size`, `media_original_filename` | `photos`, `videos`, `voice_messages`, `video_messages`, `stickers`, `gifs`, `audio`, `files` |
+| `type` | `message` or `service` |
 
-**Response (with include_dialogs=true):** each folder includes a `dialogs` array (id + title) for explicitly included peers.
+Fields that are **only present when they apply**:
 
-```json
-[
-  {"id": 2, "title": "Work", "dialogs": [{"id": -1001234567890, "title": "Crypto News"}, {"id": 400, "title": "Alice Smith"}]},
-  {"id": 3, "title": "Personal", "dialogs": [...]}
-]
-```
+| Field | Meaning |
+|---|---|
+| `sender_name` | Display name of the sender (user name or channel title) |
+| `action`, `action_data` | Service messages: e.g. `pin_message` with `{"message_id": 12}`, `chat_edit_title` with `{"title": ...}`, `phone_call`, `chat_add_user`, … |
+| `entities` | Formatting: `[{type, offset, length, url?, ...}]`. `text_url` carries the link URL. Offsets are UTF-16 |
+| `reactions` | `[{emoji \| custom_emoji_id \| paid, count, recent?: [{from_id, date}]}]` |
+| `poll` | `{question, answers: [{text, voters}], total_voters, closed, quiz, multiple_choice}` |
+| `attachment` | Non-file media: `{type: webpage \| geo \| venue \| contact \| dice \| game \| invoice \| story \| ...}` |
+| `media_mime_type`, `media_duration`, `media_status` | `media_status`: `pending`, `downloaded`, `skipped`, `failed` or `unavailable` |
+| `reply_to_peer` | The reply points into **another** chat (`reply_to` is that chat's message id) |
+| `topic_id`, `reply_to_story` | Forum topic id / reply to a story |
+| `incomplete` | **The message could not be fully archived.** Values: `unsupported_by_telegram_library` (content invisible to the client library), `unknown_media:<type>`, `media_unavailable`, `media_failed: <error>` |
+| `deleted` | `true` = deleted on Telegram; the archived copy is kept |
 
-### 3. Search Messages
+Always check `incomplete` before claiming a message's content is complete.
 
-Search for messages containing specific words or phrases using Telegram's native search API. **No pre-caching required.**
+### 4. Sync — `POST /sync/{dialog_id}`
 
-#### Within a specific dialog
+This archives new messages and extends history back to `since` (default: the
+whole chat). It also re-reads the last `refresh_days` (default 30) to pick up
+edits, reactions, poll votes and deletions, and downloads the media the settings
+allow. An interrupted or timed-out sync can simply be called again: it continues
+where it stopped.
 
-`GET /api/v3/search/messages/{dialog_id}`
-
-Uses Telegram's `messages.search` — works on any dialog, even if not previously scraped.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `q` | string | *required* | Search query (word or phrase to find) |
-| `start_date` | string | — | Upper bound — messages before this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
-| `end_date` | string | — | Lower bound — messages after this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
-| `from_user` | int | — | Only messages sent by this user ID |
-| `limit` | int | `50` | Maximum results (1–500) |
-
-#### Across all dialogs (global search)
-
-`GET /api/v3/search/messages`
-
-Uses Telegram's `messages.searchGlobal` — searches across all your chats at once.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `q` | string | *required* | Search query (word or phrase to find) |
-| `start_date` | string | — | Upper bound — messages before this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
-| `end_date` | string | — | Lower bound — messages after this date (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`) |
-| `limit` | int | `50` | Maximum results (1–500) |
-
-**Response:**
-
-```json
-{
-  "query": "bitcoin",
-  "total": 12,
-  "limit": 50,
-  "results": [
-    {
-      "message_id": 4567,
-      "dialog_id": -1001234567890,
-      "dialog_name": "Crypto News",
-      "date": "2024-01-15 14:30:00",
-      "edit_date": null,
-      "sender_id": 123456789,
-      "first_name": "John",
-      "last_name": "Doe",
-      "username": "johndoe",
-      "message": "Bitcoin just hit a new all-time high!",
-      "reply_to": null,
-      "post_author": null,
-      "is_forwarded": 0,
-      "forwarded_from_channel_id": null
-    }
-  ]
-}
-```
-
-**Examples:**
-
-```bash
-# Search in a specific chat
-curl -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/search/messages/-1001234567890?q=bitcoin"
-
-# Global search across all chats
-curl -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/search/messages?q=meeting"
-
-# Search with date range and sender filter
-curl -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/search/messages/-1001234567890?q=urgent&start_date=2024-06-30&end_date=2024-01-01&from_user=123456789"
-
-# Global search with limit
-curl -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/search/messages?q=invoice&limit=100"
-```
-
-### 4. Sync Dialog (Cache Fill)
-
-`POST /api/v3/sync/{dialog_id}`
-
-Download missing messages from Telegram into the local cache for the requested date range. Returns a summary — use `GET /history` afterwards to read the cached messages.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `start_date` | string | `2013-01-01` | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` |
-| `end_date` | string | now | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` |
-| `force_refresh` | bool | `false` | Bypass cache and re-download from Telegram |
-
-Only Telegram gap segments are downloaded — already-cached ranges are skipped automatically.
-
-**Response:**
+| Parameter | Default | Description |
+|---|---|---|
+| `since` | whole chat | Archive back to this date (UTC) |
+| `full` | `false` | Re-read **every** archived message (for old edits or deletions) |
 
 ```json
 {
   "dialog_id": -1001234567890,
-  "messages_downloaded": 1423,
-  "messages_with_media": 87,
-  "media_downloaded": 52,
-  "media_skipped": 35
+  "new_messages": 1423, "refreshed_messages": 210, "deleted_messages": 1,
+  "media_downloaded": 52, "media_skipped": 35, "media_failed": 0,
+  "reached_start": true, "covered_from": "2019-03-01T10:00:00Z",
+  "migrated_from": null,
+  "problems": [{"dialog_id": -1001234567890, "message_id": 881, "problem": "unsupported_by_telegram_library"}]
 }
 ```
 
-- `messages_downloaded` — messages fetched from Telegram in this call (not from cache)
-- `messages_with_media` — of those, how many had media attached
-- `media_downloaded` — media files actually downloaded to disk
-- `media_skipped` — media not downloaded (disabled in settings, size limit, type filter)
+- `problems` lists **everything currently not fully archived** in the dialog,
+  not only what this call found. `message_id: 0` is a problem with the dialog as
+  a whole, e.g. `count_mismatch` (Telegram reports more messages than the archive
+  holds). **Report every problem to the user.**
+- `migrated_from`: the group was upgraded from a basic group. Its older history
+  lives in that dialog, which is synced too; read it with `/history/{migrated_from}`.
 
-**Examples:**
-
-```bash
-# Sync full history
-curl -s -X POST -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/sync/-1001234567890"
-
-# Sync specific date range
-curl -s -X POST -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/sync/-1001234567890?start_date=2024-06-01&end_date=2024-12-31"
-
-# Force re-download (bypass cache)
-curl -s -X POST -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/sync/-1001234567890?force_refresh=true"
-```
-
-### 5. Message History (SSE Streaming)
-
-`GET /api/v3/history/{dialog_id}`
-
-Always use `curl -N` to enable streaming.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `start_date` | string | chat beginning | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` |
-| `end_date` | string | now | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` |
-| `chunk_size` | int | `100` | Messages per SSE chunk (must be > 0) |
-| `force_refresh` | bool | `false` | Bypass cache and re-download from Telegram |
-| `reverse` | bool | `true` | If `true`, stream oldest-first. If `false`, newest-first. |
-
-Messages are cached in SQLite per dialog. First request downloads from Telegram; subsequent requests serve from cache (only downloading missing date ranges). Use `force_refresh=true` to bypass.
-
-**Examples:**
+### 5. Media — `GET /files/{dialog_id}/{message_id}`
 
 ```bash
-# All messages (oldest-first, default)
-curl -N -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/history/-1001234567890"
-
-# Date range with smaller chunks
-curl -N -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&chunk_size=50"
-
-# Newest-first
-curl -N -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/history/-1001234567890?start_date=2024-01-01&end_date=2024-01-31&reverse=false"
+curl -s -H "$AUTH" "http://localhost:8000/api/v4/files/-1001234567890/4567" -o file
+curl -s -H "$AUTH" "http://localhost:8000/api/v4/files/-1001234567890/4567?metadata_only=true"
+# → {"file_path": "/app/data/media/-1001234567890/4567-photo.jpg", "size": 2458624}
 ```
 
-**SSE format** — each event contains a `messages` array:
+A `404` explains why: there is no media, or it was skipped, failed or not
+downloaded yet. Run `POST /sync` to download it.
 
-```
-data: {"messages": [{...}, {...}]}
+### 6. Search messages (live on Telegram, not the archive)
 
-data: {"messages": [{...}, {...}]}
-```
+- `GET /search/messages/{dialog_id}?q=...`: within one dialog (also `from_user`)
+- `GET /search/messages?q=...`: all dialogs
+- `start_date` = lower bound and `end_date` = upper bound (UTC). `limit` ≤ 500.
 
-**Message object (flat structure):**
+The response is `{query, count, limit, results}`. Each result is a message object
+(as above) plus `dialog_id` and `dialog_name`. `count` is the number of results
+returned, not the total number of matches.
 
-```json
-{
-  "message_id": 12345,
-  "date": "2024-01-15 14:30:00",
-  "edit_date": null,
-  "sender_id": 123456789,
-  "first_name": "John",
-  "last_name": "Doe",
-  "username": "johndoe",
-  "message": "Message content here",
-  "reply_to": 12344,
-  "reply_quote_text": null,
-  "reply_quote_offset": null,
-  "post_author": null,
-  "is_forwarded": 0,
-  "forwarded_from_channel_id": null,
-  "media_type": "photos",
-  "media_uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "media_original_filename": null,
-  "media_size": 2458624
-}
-```
-
-Key details:
-- `date` / `edit_date` format: `YYYY-MM-DD HH:MM:SS` (UTC), not ISO 8601
-- `media_type` is one of: `photos`, `videos`, `voice_messages`, `video_messages`, `stickers`, `gifs`, `files` (or `null` if no media)
-- `media_uuid` is `null` when no media; use it with the files endpoint to download
-- `media_original_filename` is `null` for photos (only documents/audio carry filenames)
-- `is_forwarded`: `0` or `1` (integer, not boolean)
-- `reply_quote_text` contains the selected quoted fragment when replying to part of a message; otherwise `null`
-- `reply_quote_offset` is the character offset where the quoted fragment starts in the original replied-to message; otherwise `null`
-
-### 6. Download Media
-
-`GET /api/v3/files/{file_uuid}`
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `metadata_only` | bool | `false` | Return JSON metadata instead of file content |
-
-**Download file:**
-
-```bash
-curl -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/files/$FILE_UUID" -o photo.jpg
-```
-
-**Get metadata only** (useful for local file access):
-
-```bash
-curl -s -H "X-Telegram-Username: $USERNAME" \
-  "http://localhost:8000/api/v3/files/$FILE_UUID?metadata_only=true"
-```
-
-**Metadata response:**
-
-```json
-{
-  "file_path": "/app/data/dialogs/-1001234567890/media/a1b2c3d4.jpg",
-  "original_filename": "document.pdf",
-  "size": 2458624
-}
-```
-
-**Local file access (Docker):** When server runs locally in Docker, you can skip HTTP download and copy files directly. Map `file_path` from container to host based on your volume mount:
-
-```bash
-# Container: /app/data/...  →  Host: /root/telegram-scraper-data/...
-HOST_PATH="${CONTAINER_PATH/\/app\/data/\/root\/telegram-scraper-data}"
-cp "$HOST_PATH" ./my_file.jpg
-```
-
-### 7. Settings
-
-`GET /api/v3/settings` — read current settings
-`PATCH /api/v3/settings` — update (partial, only supplied fields change)
-
-**Defaults:**
+### 7. Settings — `GET /settings`, `PATCH /settings` (partial)
 
 | Setting | Default | Description |
-|---------|---------|-------------|
-| `download_media` | `true` | Download media files during history scraping |
-| `max_media_size_mb` | `20` | Max media size in MB. `0` or `null` = no limit. **Media over 20MB is skipped by default.** |
-| `telegram_batch_size` | `100` | Batch size for Telegram API downloads (must be > 0) |
-| `repair_media` | `true` | Re-download media previously skipped due to size limits or disabled downloads |
-| `download_file_types` | object (see below) | Per-type download toggles: `photos`, `videos`, `voice_messages`, `video_messages`, `stickers`, `gifs`, `files`. Defaults: all `true`. |
+|---|---|---|
+| `download_media` | `true` | Download media during `/sync` |
+| `max_media_size_mb` | `20` | `0`/`null` = no limit |
+| `telegram_batch_size` | `100` | Messages per archive transaction |
+| `refresh_days` | `30` | Days each sync re-reads for edits, reactions and deletions (`0` = off) |
+| `download_file_types` | all `true` | `photos`, `videos`, `voice_messages`, `video_messages`, `stickers`, `gifs`, `audio`, `files` |
 
-**Update example:**
-
-```bash
-curl -s -X PATCH -H "X-Telegram-Username: $USERNAME" \
-  -H "Content-Type: application/json" \
-  -d '{"download_media": false, "max_media_size_mb": 50}' \
-  "http://localhost:8000/api/v3/settings"
-```
-
-Changes take effect immediately and persist to `settings.yaml`.
+Media skipped by settings is downloaded by a later `/sync` once the settings
+allow it.
 
 ---
 
-## Error Responses
+## Errors
 
-All errors return `{"detail": "..."}` with the appropriate HTTP status code.
+`{"detail": "..."}` with:
 
 | Code | Meaning |
-|------|---------|
-| `400` | Invalid parameters (bad date format, start_date >= end_date) |
-| `401` | Missing `X-Telegram-Username` header or session not authenticated |
-| `404` | QR session / media file / folder not found |
-| `409` | Session already exists (use `force: true`) or wrong 2FA state |
-| `422` | No fields provided for settings update |
-| `429` | Telegram rate limit — check `Retry-After` header for wait seconds |
-| `500` | Internal server error |
-| `502` | Failed to connect to Telegram for QR login |
+|---|---|
+| `400` | Bad date format, or start ≥ end |
+| `401` | Missing or wrong token, **or** the Telegram session is not authorized (log in again) |
+| `404` | Dialog not found (use a marked id), no media, or QR session not found |
+| `409` | Session exists (use `force`), wrong 2FA state, or the archive belongs to another Telegram account |
+| `422` | Invalid parameters |
+| `429` | Telegram rate limit (`Retry-After`) |
+| `500` | Server error (e.g. settings could not be saved) |
+| `502` | Could not reach Telegram for QR login |
 
----
-
-## Data Directory Layout
+## Data directory
 
 ```
-{data_dir}/                   (default: ./data, Docker: /app/data)
-├── sessions/                 Telegram session files
-├── dialogs/                  Per-dialog SQLite databases + media
-│   └── {dialog_id}/
-│       ├── {dialog_id}.db
-│       └── media/
-└── settings.yaml             Runtime settings
+{data_dir}/            (default ./data, Docker /app/data)
+├── token              API token
+├── settings.yaml      runtime settings
+├── sessions/          Telegram session(s)
+├── archive.db         all archived messages (raw Telegram JSON included)
+└── media/{dialog_id}/{message_id}-{name}
 ```
 
-Docker volume mount maps `/app/data` → host path (e.g. `/root/telegram-scraper-data`).
+## Tips
 
----
-
-## Quick Tips
-
-1. **Always use `-N` with curl** for SSE streaming endpoints (`/history/`)
-2. **Use `chunk_size=50`** for large histories to reduce rate limit risk
-3. **Media is capped at 20MB by default** — increase `max_media_size_mb` via settings if needed
-4. **Use `POST /sync` to pre-fill the cache** before reading with `GET /history` — avoids long SSE streams
-5. **Use `force_refresh=true` sparingly** — prefer cached data
-5. **Fuzzy search**: `min_score=0.6` for broad results, `0.8`+ for precise
-6. **Check server logs**: `docker logs telegram-scraper` for troubleshooting
-7. **Interactive API docs**: http://localhost:8000/docs (Swagger UI)
+1. Use `curl -N` for `/history`, and check for the final `done` event.
+2. For a big chat, run `POST /sync/{id}` first (repeat if it times out), then
+   read with `/history`.
+3. Use `POST /sync/{id}?full=true` occasionally to catch edits and deletions
+   older than `refresh_days`.
+4. Search is live and does not need the archive. History needs a sync, which
+   happens automatically.
+5. Interactive API docs: http://localhost:8000/docs
