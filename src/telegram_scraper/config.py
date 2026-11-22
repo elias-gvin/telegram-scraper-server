@@ -33,6 +33,7 @@ class MediaCategory(StrEnum):
     VIDEO_MESSAGES = "video_messages"
     STICKERS = "stickers"
     GIFS = "gifs"
+    AUDIO = "audio"
     FILES = "files"
 
 
@@ -45,6 +46,7 @@ class DownloadFileTypes(BaseModel):
     video_messages: bool = True
     stickers: bool = True
     gifs: bool = True
+    audio: bool = True
     files: bool = True
 
 
@@ -52,8 +54,9 @@ class RuntimeSettings(BaseModel):
     """Runtime-tunable settings (from settings.yaml)."""
 
     download_media: bool = True
-    max_media_size_mb: Optional[float] = 20  # None = no limit
-    telegram_batch_size: int = 100
+    max_media_size_mb: Optional[float] = Field(default=20, ge=0)  # None/0 = no limit
+    telegram_batch_size: int = Field(default=100, gt=0)
+    refresh_days: int = Field(default=30, ge=0)  # sync re-reads this many recent days
     repair_media: bool = True
     download_file_types: DownloadFileTypes = Field(default_factory=DownloadFileTypes)
 
