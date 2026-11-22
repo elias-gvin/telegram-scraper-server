@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from telethon.tl import types as t
@@ -15,7 +15,7 @@ from telegram_scraper.sync import sync_dialog
 from .fake_telegram import CHANNEL, GROUP, SUPERGROUP, FakeTelegram, photo, text_msg
 
 CHAT_ID = -1000000005000  # CHANNEL, marked
-NOW = datetime.now(timezone.utc).replace(microsecond=0)
+NOW = datetime.now(UTC).replace(microsecond=0)
 
 
 def messages(ids, chat=CHANNEL):

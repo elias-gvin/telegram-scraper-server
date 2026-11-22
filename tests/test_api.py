@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -18,7 +18,7 @@ CHAT = -1000000005000  # CHANNEL, marked id
 
 
 def day(d: int) -> datetime:
-    return datetime(2025, 1, d, 12, tzinfo=timezone.utc)
+    return datetime(2025, 1, d, 12, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)

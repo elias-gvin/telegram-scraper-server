@@ -22,7 +22,7 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from telethon import utils
@@ -115,9 +115,7 @@ async def sync_dialog(
             await _download_media(ctx, entity, settings, media_dir)
         if reached_start:
             await _check_count(ctx, entity)
-        archive.finish_sync(
-            did, reached_start, int(datetime.now(timezone.utc).timestamp())
-        )
+        archive.finish_sync(did, reached_start, int(datetime.now(UTC).timestamp()))
 
         final = archive.dialog(did)
         report.reached_start = bool(final["reached_start"])
@@ -251,7 +249,7 @@ async def _refresh(
     # window read from Telegram and the window checked for deletions are identical.
     since = None
     if not full:
-        now = datetime.now(timezone.utc).replace(microsecond=0)
+        now = datetime.now(UTC).replace(microsecond=0)
         since = now - timedelta(days=settings.refresh_days)
     seen, _ = await _fetch(
         ctx,
