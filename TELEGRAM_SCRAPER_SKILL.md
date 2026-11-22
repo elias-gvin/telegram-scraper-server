@@ -166,6 +166,11 @@ The response contains counts plus:
 - A `404` explains why there is no file: no media, skipped by settings, failed,
   not downloaded yet, or missing on disk. Run `POST /sync`.
 
+**Re-downloading:** a sync never downloads a file it already has, because
+Telegram files never change. To force it, delete the files under
+`{data_dir}/media/{dialog_id}/` (or a single file) and run `POST /sync`. The
+missing files are downloaded again.
+
 ## Errors worth knowing
 
 | Code | Meaning |

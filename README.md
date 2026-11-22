@@ -98,6 +98,19 @@ data/
 One data directory belongs to one Telegram account. The archive refuses a
 session of a different account, because private-chat message ids are per account.
 
+## Re-downloading media files
+
+Telegram files never change, so a sync never downloads a file it already has.
+To download files again anyway (for example after disk damage), delete them and
+sync: the archive notices the missing files, flags them `missing` in history
+until then, and downloads them again.
+
+```bash
+rm -rf data/media/-1001234567890                      # every file of one chat
+rm data/media/-1001234567890/12405-photo.jpg          # or a single file
+curl -X POST -H "$AUTH" "http://localhost:8000/api/v4/sync/-1001234567890"
+```
+
 ## Checking export fidelity
 
 Export a chat from Telegram Desktop (JSON), sync the same chat, and compare:
