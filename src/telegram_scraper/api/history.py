@@ -9,7 +9,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import StreamingResponse
 from telethon import utils
 
@@ -19,6 +19,7 @@ from ..serialize import serialize_row
 from ..sync import sync_dialog
 from ..telegram import SESSION_LOST, resolve
 from .deps import get_archive, get_client, get_config, parse_date
+from .settings import SettingsUpdate, apply_update
 
 router = APIRouter(tags=["history"])
 logger = logging.getLogger(__name__)
@@ -139,16 +140,24 @@ async def sync_endpoint(
     full: Annotated[
         bool, Query(description="Re-read every archived message, not only recent ones")
     ] = False,
+    overrides: SettingsUpdate | None = Body(
+        default=None,
+        description="Settings for this call only (same fields as PATCH /settings); "
+        "nothing is saved. Media skipped now is re-checked by later syncs.",
+    ),
     client=Depends(get_client),
     archive: Archive = Depends(get_archive),
     config: ServerConfig = Depends(get_config),
 ) -> dict:
     entity = await resolve(client, dialog_id)
+    settings = (
+        apply_update(config.settings, overrides) if overrides else config.settings
+    )
     report = await sync_dialog(
         client,
         archive,
         entity,
-        config.settings,
+        settings,
         config.media_dir,
         since=parse_date(since, "since"),
         full=full,

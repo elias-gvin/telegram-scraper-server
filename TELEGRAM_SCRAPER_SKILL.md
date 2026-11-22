@@ -128,7 +128,11 @@ Search results (`/search/messages…`, live on Telegram) use the same shape, plu
 ## Syncing: `POST /sync/{dialog_id}`
 
 This archives new messages and extends history back to `since` (default: the
-whole chat). It also re-reads the last `refresh_days` (setting, default 30) for
+whole chat). An optional JSON body overrides settings **for this call only**,
+with the same fields as `PATCH /settings`. Example:
+`{"max_media_size_mb": 500, "refresh_days": 90}`. Nothing is saved. Media
+skipped because of an override is checked again by later syncs, with whatever
+settings those use. It also re-reads the last `refresh_days` (setting, default 30) for
 edits, reactions, poll votes and deletions (`full=true`: re-read everything), and
 downloads media allowed by the settings. It is **resumable**: if it times out or
 fails, call it again.

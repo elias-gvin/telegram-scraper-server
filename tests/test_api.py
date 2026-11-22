@@ -379,3 +379,25 @@ async def test_bare_id_is_rejected_with_a_hint(client, tg, monkeypatch):
     monkeypatch.setattr(tg, "get_entity", guess)
     resp = await client.get(f"{API}/history/5000")
     assert resp.status_code == 404 and str(CHAT) in resp.json()["detail"]
+
+
+async def test_sync_settings_override_applies_to_that_call_only(
+    client, tg, server_config
+):
+    tg.edit(CHANNEL, 5, media=photo(size=50 * 1024 * 1024))  # 50 MB
+    server_config.settings.download_media = True
+    server_config.settings.max_media_size_mb = 20  # global limit
+
+    report = (await client.post(f"{API}/sync/{CHAT}")).json()
+    assert report["media_skipped"] == 1 and report["media_downloaded"] == 0
+
+    body = {"max_media_size_mb": 100}
+    report = (await client.post(f"{API}/sync/{CHAT}", json=body)).json()
+    assert report["media_downloaded"] == 1
+    assert server_config.settings.max_media_size_mb == 20  # nothing saved
+    assert (await client.get(f"{API}/settings")).json()["max_media_size_mb"] == 20
+
+
+async def test_sync_override_is_validated(client):
+    resp = await client.post(f"{API}/sync/{CHAT}", json={"refresh_days": -1})
+    assert resp.status_code == 422
