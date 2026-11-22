@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 
 from telegram_scraper.archive import Archive
-from telegram_scraper.serialize import serialize_row
+from telegram_scraper.serialize import iso, serialize_row
 
 ENTITY_TYPES = {  # native text_entities type -> ours
     "bold": "bold",
@@ -46,6 +46,24 @@ def plain(text) -> str:
         if isinstance(text, str)
         else "".join(p if isinstance(p, str) else p["text"] for p in text)
     )
+
+
+def strings(node) -> str:
+    """All `text` values in a native rich_message tree (not its structure labels)."""
+    if isinstance(node, list):
+        return " ".join(map(strings, node))
+    if isinstance(node, dict):
+        return " ".join(
+            v if k == "text" and isinstance(v, str) else strings(v)
+            for k, v in node.items()
+            if isinstance(v, (dict, list)) or k == "text"
+        )
+    return ""
+
+
+def letters(text: str) -> str:
+    """Compare content, not formatting: letters only (list numbering differs)."""
+    return "".join(ch for ch in text if ch.isalpha())
 
 
 def native_peer(value: str | None) -> int | None:
@@ -98,7 +116,9 @@ def compare(native: dict, ours: dict, c: Counter):
         c["formatting_lost"] += any(
             our_entities[k] < n for k, n in native_entities.items()
         )
-    urls = [e["href"] for e in native.get("text_entities", []) if e["type"] == "text_link"]
+    urls = [
+        e["href"] for e in native.get("text_entities", []) if e["type"] == "text_link"
+    ]
     if urls:
         c["text_link"] += 1
         c["text_link_url_lost"] += any(
@@ -116,7 +136,9 @@ def compare(native: dict, ours: dict, c: Counter):
         ).get("question")
     if "rich_message" in native:
         c["rich_messages"] += 1
-        c["rich_flagged_incomplete"] += bool(ours.get("incomplete"))
+        c["rich_text_mismatch"] += letters(strings(native["rich_message"])) != letters(
+            ours.get("rich_text", "")
+        )
     native_media = MEDIA_TYPES.get(native.get("media_type")) or (
         "photos" if "photo" in native else None
     )
@@ -128,25 +150,30 @@ def compare(native: dict, ours: dict, c: Counter):
 
 
 def main(data_dir: str, dialog_id: str, export_dir: str):
+    """Compare only the period both sides cover (an export is usually a date range)."""
     archive = Archive(Path(data_dir) / "archive.db")
-    ours = {
-        r["message_id"]: (r["date"], serialize_row(r, archive.peer))
-        for batch in archive.read(int(dialog_id), 0, 2**40)
-        for r in batch
-    }
-    if not ours:
+    exported = json.loads((Path(export_dir) / "result.json").read_text())["messages"]
+    dates = [int(m["date_unixtime"]) for m in exported]
+    archived = [
+        r["date"]
+        for b in archive.read(int(dialog_id), 0, 2**40, batch=10_000)
+        for r in b
+    ]
+    if not archived:
         sys.exit("dialog not archived")
-    lo, hi = min(d for d, _ in ours.values()), max(d for d, _ in ours.values())
-    native = {
-        m["id"]: m
-        for m in json.loads((Path(export_dir) / "result.json").read_text())["messages"]
-        if lo <= int(m["date_unixtime"]) <= hi
+    lo, hi = max(min(dates), min(archived)), min(max(dates), max(archived))
+    native = {m["id"]: m for m in exported if lo <= int(m["date_unixtime"]) <= hi}
+    ours = {
+        r["message_id"]: serialize_row(r, archive.peer)
+        for batch in archive.read(int(dialog_id), lo, hi)
+        for r in batch
     }
     c = Counter(native=len(native), archived=len(ours))
     c["missing_in_archive"] = len(native.keys() - ours.keys())
     c["only_in_archive"] = len(ours.keys() - native.keys())
     for mid in native.keys() & ours.keys():
-        compare(native[mid], ours[mid][1], c)
+        compare(native[mid], ours[mid], c)
+    print(f"{'compared period':32} {iso(lo)} .. {iso(hi)}")
     for key in sorted(c):
         print(f"{key:32} {c[key]}")
 

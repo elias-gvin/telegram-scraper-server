@@ -89,6 +89,7 @@ CATALOG = [
         "",
         media=t.MessageMediaPoll(
             poll=t.Poll(
+                hash=0,
                 id=1,
                 question=twe("Lunch?"),
                 answers=[t.PollAnswer(twe("Yes"), b"0"), t.PollAnswer(twe("No"), b"1")],
@@ -151,6 +152,30 @@ CATALOG = [
     text_msg(
         GROUP, 21, "", media=t.MessageMediaPhoto(photo=None, ttl_seconds=10)
     ),  # expired self-destructing
+    text_msg(
+        GROUP,
+        22,
+        "",
+        rich_message=t.RichMessage(
+            blocks=[
+                t.PageBlockHeading1(text=t.TextPlain("Title")),
+                t.PageBlockParagraph(
+                    text=t.TextConcat(
+                        [t.TextPlain("plain "), t.TextBold(t.TextPlain("bold"))]
+                    )
+                ),
+                t.PageBlockOrderedList(
+                    items=[
+                        t.PageListOrderedItemText(text=t.TextPlain("one")),
+                        t.PageListOrderedItemText(text=t.TextPlain("two")),
+                    ]
+                ),
+                t.PageBlockList(items=[t.PageListItemText(text=t.TextPlain("dot"))]),
+            ],
+            photos=[],
+            documents=[],
+        ),
+    ),
     text_msg(CHANNEL, 20, "channel post", sender=None, post_author="Editor"),
 ]
 
@@ -238,6 +263,7 @@ EXPECTED = {
         "attachment": {"type": "contact", "phone_number": "+100", "first_name": "Carol"}
     },
     21: {"incomplete": "media_unavailable"},
+    22: {"rich_text": "Title\n\nplain bold\n\n1. one\n2. two\n\n- dot", "message": ""},
     20: {
         "sender_id": -1000000005000,
         "sender_name": "Test Channel",
@@ -287,7 +313,7 @@ async def test_message_kind_survives(synced, message_id):
 
 async def test_nothing_looks_like_an_empty_plain_message(synced):
     messages, _ = synced
-    content = ("media_type", "poll", "attachment", "incomplete", "action")
+    content = ("media_type", "poll", "attachment", "incomplete", "action", "rich_text")
     empty = [
         m["message_id"]
         for m in messages.values()

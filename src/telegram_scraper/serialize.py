@@ -92,10 +92,13 @@ def _text(value) -> str:
 
 def incomplete(raw: dict, media_status: str | None = None) -> str | None:
     """Why this message is not fully archived, or None. Also used by sync to report problems."""
-    if (
-        raw["_"] == "Unserializable"
-    ):  # see sync.py: the Telethon object could not be stored
+    if raw["_"] == "Unserializable":  # sync.py could not store the Telethon object
         return f"raw_error: {raw['error']}"
+    rich = raw.get("rich_message")
+    if rich and rich.get("part"):
+        return "rich_message_partial"
+    if rich and (rich.get("photos") or rich.get("documents")):
+        return "rich_media_not_downloaded"  # files embedded in the post; raw has their metadata
     media = raw.get("media")
     kind = media and media["_"]
     if kind == "MessageMediaUnsupported":
@@ -138,6 +141,7 @@ def serialize(
     else:
         out.update(_reply(raw.get("reply_to")), type="message")
     extras = {
+        "rich_text": _rich_text(raw.get("rich_message")),
         "sender_name": display_name(sender),
         "entities": [
             {"type": snake(e["_"], "MessageEntity"), **_clean(e)}
@@ -319,3 +323,26 @@ def _reactions(reactions: dict | None) -> list | None:
             item["recent"] = who
         out.append(item)
     return out or None
+
+
+def _rich_text(node) -> str:
+    """Plain text of a rich post (`rich_message`: page blocks + rich texts).
+    Headings, bold, links etc. are flattened; the full structure stays in the raw."""
+    if isinstance(node, list):
+        return "".join(map(_rich_text, node))
+    if not isinstance(node, dict):
+        return ""
+    if node["_"] == "TextPlain":
+        return node["text"]
+    if node["_"] == "TextConcat":
+        return _rich_text(node["texts"])
+    if "blocks" in node:  # the message itself, quotes, list items with paragraphs
+        return "\n\n".join(t for t in map(_rich_text, node["blocks"]) if t)
+    if "items" in node:  # lists
+        start = node.get("start") or 1
+        ordered = node["_"] == "PageBlockOrderedList"
+        return "\n".join(
+            f"{f'{start + n}.' if ordered else '-'} {_rich_text(item)}"
+            for n, item in enumerate(node["items"])
+        )
+    return _rich_text(node.get("text"))

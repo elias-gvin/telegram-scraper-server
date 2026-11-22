@@ -115,9 +115,14 @@ ruff check src/
 
 ## Known limits
 
-- **Rich posts** (Telegram's newer structured messages) reach Telethon 1.40 as
-  `MessageMediaUnsupported` with no content. They are archived as `incomplete`
-  until Telethon supports them.
+- **Rich posts** (Telegram's structured messages with headings and lists) are
+  archived complete in the raw message. The API returns them as plain text
+  (`rich_text`), with the structure flattened. Files embedded in a rich post are
+  not downloaded and are flagged.
+- **New Telegram features.** Content that the pinned Telethon version cannot read
+  arrives as an empty placeholder, flagged `unsupported_by_telegram_library`.
+  Upgrading Telethon fixes this: the rich posts were invisible with 1.40 and are
+  complete with 1.46.
 - **Old edits and deletions.** Edits and deletions older than `refresh_days` are
   only seen with `POST /sync/{id}?full=true`.
 - **History is "from a date until now".** A dialog cannot be archived as an

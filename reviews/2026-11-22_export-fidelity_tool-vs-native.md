@@ -223,3 +223,34 @@ The scope warning at the top still applies:
 - other service events.
 
 Re-run the comparison script whenever you export such a chat.
+
+## Rich posts and the full comparison (Telethon 1.46, 2026-11-22)
+
+**Rich posts.** Telethon 1.40 (layer 214) received the two rich posts as an
+empty `MessageMediaUnsupported`. Telethon 1.46 (layer 233) receives the complete
+`rich_message` structure: 5.8 KB and 13.5 KB of raw data. After the upgrade:
+
+- the archive stores the full structure in the raw message;
+- the API returns it as plain text (`rich_text`);
+- a full re-sync replaced the empty placeholders and cleared both problems.
+
+**Comparison.** The comparison now only covers the period the export covers.
+Before, it counted older archived messages as "only in archive". All five
+chats, full histories archived:
+
+| Chat | Native msgs | Missing | Only in archive | Field mismatches | Rich text matches the native export |
+|---|---:|---:|---:|---:|---|
+| Diary | 105 | 0 | 0 | 0 | — |
+| SAVED INFO | 964 | 0 | 0 | 0 | 1/1 |
+| Samosbor RPG | 445 | 0 | 0 | 0 | — |
+| Ира Яворская | 1,822 | 0 | 0 | 0 | — |
+| Перестройка | 85 | 0 | 0 | 0 | 1/1 |
+
+**Full-history run (all five chats, since the first message):**
+
+- 178,596 messages archived;
+- every one serialized without error;
+- no count mismatches against Telegram.
+
+Remaining problems: two DM messages whose self-destructing media expired
+(`media_unavailable`).

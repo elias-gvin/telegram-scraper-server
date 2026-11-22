@@ -8,14 +8,13 @@ packages = [{include = "telegram_scraper", from = "src"}]
 
 [tool.poetry.dependencies]
 python = ">=3.12,<4.0"
-Telethon = "1.40.0"
+Telethon = "1.46.0"
 qrcode = ">=8.2.0"
 python-dotenv = ">=1.0.0"
 fastapi = ">=0.115.0"
 uvicorn = {extras = ["standard"], version = ">=0.32.0"}
 pyyaml = ">=6.0.0"
 click = ">=8.0.0"
-sqlmodel = "^0.0.32"
 
 [tool.poetry.group.dev.dependencies]
 ruff = ">=0.14.10"

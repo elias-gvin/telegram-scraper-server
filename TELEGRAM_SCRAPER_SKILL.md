@@ -110,6 +110,7 @@ Fields present only when they apply:
 | Field | Meaning |
 |---|---|
 | `sender_name` | Display name of the sender (user name or channel title) |
+| `rich_text` | Rich posts (structured messages with headings and lists): their text, flattened. `message` is empty for these |
 | `action`, `action_data` | Service messages, e.g. `pin_message` with `{"message_id": 12}`, `chat_edit_title` with `{"title": …}`, `phone_call`, `chat_add_user` |
 | `entities` | `[{type, offset, length, url?, …}]`. `text_url` carries the hidden link URL. Offsets are UTF-16 |
 | `reactions` | `[{emoji \| custom_emoji_id \| paid, count, recent?: [{from_id, date}]}]` |
@@ -119,7 +120,7 @@ Fields present only when they apply:
 | `reply_to_peer` | The reply points into **another** chat |
 | `topic_id`, `reply_to_story` | Forum topic / reply to a story |
 | `deleted` | `true` = deleted on Telegram; the archived copy is kept |
-| `incomplete` | **The message is not fully archived.** Values: `unsupported_by_telegram_library` (content invisible to the client library), `unknown_media:<type>`, `media_unavailable`, `media_failed: <error>`. Always mention this when quoting such a message |
+| `incomplete` | **The message is not fully archived.** Values: `unsupported_by_telegram_library` (content invisible to the client library), `unknown_media:<type>`, `media_unavailable`, `media_failed: <error>`, `rich_media_not_downloaded`, `rich_message_partial`, `raw_error: …`, `serializer_error: …`. Always mention this when quoting such a message |
 
 Search results (`/search/messages…`, live on Telegram) use the same shape, plus
 `dialog_id` and `dialog_name`.
