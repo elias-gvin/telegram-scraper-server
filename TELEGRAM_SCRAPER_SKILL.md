@@ -116,11 +116,12 @@ Fields present only when they apply:
 | `reactions` | `[{emoji \| custom_emoji_id \| paid, count, recent?: [{from_id, date}]}]` |
 | `poll` | `{question, answers: [{text, voters}], total_voters, closed, quiz, multiple_choice}` |
 | `attachment` | Non-file media: `{type: webpage \| geo \| venue \| contact \| dice \| game \| invoice \| story \| …}` |
-| `media_mime_type`, `media_duration`, `media_status` | `media_status`: `pending` / `downloaded` / `skipped` / `failed` / `unavailable` |
+| `media_mime_type`, `media_duration`, `media_status` | `media_status`: `pending` / `downloaded` / `skipped` / `failed` / `unavailable` / `missing` (archived, but the file is gone from disk; the next `/sync` re-downloads it) |
+| `media_file` | Downloaded files only: path **relative to `{data_dir}/media`**, e.g. `-1001777888999/12405-photo.jpg` |
 | `reply_to_peer` | The reply points into **another** chat |
 | `topic_id`, `reply_to_story` | Forum topic / reply to a story |
 | `deleted` | `true` = deleted on Telegram; the archived copy is kept |
-| `incomplete` | **The message is not fully archived.** Values: `unsupported_by_telegram_library` (content invisible to the client library), `unknown_media:<type>`, `media_unavailable`, `media_failed: <error>`, `rich_media_not_downloaded`, `rich_message_partial`, `raw_error: …`, `serializer_error: …`. Always mention this when quoting such a message |
+| `incomplete` | **The message is not fully archived.** Values: `unsupported_by_telegram_library` (content invisible to the client library), `unknown_media:<type>`, `media_unavailable`, `media_failed: <error>`, `media_missing_on_disk`, `rich_media_not_downloaded`, `rich_message_partial`, `raw_error: …`, `serializer_error: …`. Always mention this when quoting such a message |
 
 Search results (`/search/messages…`, live on Telegram) use the same shape, plus
 `dialog_id` and `dialog_name`.
@@ -149,9 +150,21 @@ The response contains counts plus:
 
 ## Media
 
-`GET /files/{dialog_id}/{message_id}` returns the file. Add `?metadata_only=true`
-to get its local path instead. A `404` explains why: no media, skipped by
-settings, failed, or not downloaded yet; run `POST /sync`.
+**On the server's machine:** read the files directly.
+
+- **Path:** each downloaded message in `/history` has `media_file`, relative to
+  the media folder. Join the two: `{data_dir}/media/{media_file}`.
+- **Media folder:** the server does not report it. Configure it in the client
+  (e.g. `./data/media`; for Docker, the host side of the `/app/data` volume
+  mount).
+- **Storing:** keep (dialog_id, message_id) or `media_file`, never the absolute
+  path.
+
+**Over HTTP:** `GET /files/{dialog_id}/{message_id}` returns the file.
+
+- `?metadata_only=true` returns `{file_path, media_file, size}` instead.
+- A `404` explains why there is no file: no media, skipped by settings, failed,
+  not downloaded yet, or missing on disk. Run `POST /sync`.
 
 ## Errors worth knowing
 

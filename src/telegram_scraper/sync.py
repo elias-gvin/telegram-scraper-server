@@ -270,7 +270,9 @@ async def _download_media(
     ctx: _Context, entity, settings: RuntimeSettings, media_dir: Path
 ):
     wanted = {}
-    for row in ctx.archive.media_without_file(ctx.dialog_id):
+    for row in ctx.archive.media_rows(ctx.dialog_id):
+        if row["status"] == "downloaded" and (media_dir / row["path"]).is_file():
+            continue  # a "downloaded" file that is gone from disk is handled like any other
         info = media_files.media_info(json.loads(row["raw"]).get("media"))
         if (
             info is None

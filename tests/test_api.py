@@ -416,3 +416,40 @@ async def test_requests_before_login_do_not_block_the_login(server_config):
         resp = await c.get(f"{API}/search/dialogs")
     assert resp.status_code == 401 and "POST /auth/qr" in resp.json()["detail"]
     assert not list(server_config.sessions_dir.iterdir())
+
+
+async def test_history_gives_relative_file_paths_and_flags_missing_files(
+    client, tg, server_config
+):
+    server_config.settings.download_media = True
+    tg.edit(CHANNEL, 5, media=photo())
+    await client.post(f"{API}/sync/{CHAT}")
+
+    def message_5(evts):
+        return next(
+            m
+            for e, d in evts
+            if e == "data"
+            for m in d["messages"]
+            if m["message_id"] == 5
+        )
+
+    msg = message_5(await history(client))
+    assert msg["media_status"] == "downloaded"
+    file = server_config.media_dir / msg["media_file"]  # relative to {data_dir}/media
+    assert (
+        not msg["media_file"].startswith("/") and file.read_bytes() == b"media-bytes-5"
+    )
+
+    file.unlink()  # gone from disk
+    msg = message_5(await history(client))
+    assert "media_file" not in msg
+    assert (
+        msg["media_status"] == "missing"
+        and msg["incomplete"] == "media_missing_on_disk"
+    )
+
+    report = (await client.post(f"{API}/sync/{CHAT}")).json()  # sync restores it
+    assert report["media_downloaded"] == 1 and file.read_bytes() == b"media-bytes-5"
+    relative = file.relative_to(server_config.media_dir).as_posix()
+    assert message_5(await history(client))["media_file"] == relative

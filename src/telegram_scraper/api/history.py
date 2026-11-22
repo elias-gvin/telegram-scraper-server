@@ -97,7 +97,10 @@ async def get_history(
             for rows in archive.read(
                 did, low, int(end.timestamp()), not reverse, chunk_size
             ):
-                messages = [serialize_row(r, peer) for r in rows]
+                messages = [
+                    _with_file(serialize_row(r, peer), r, config.media_dir)
+                    for r in rows
+                ]
                 count += len(messages)
                 incomplete += sum("incomplete" in m for m in messages)
                 yield sse({"messages": messages})
@@ -118,6 +121,17 @@ async def get_history(
             )
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+def _with_file(message: dict, row, media_dir) -> dict:
+    """Add `media_file` (relative to {data_dir}/media) for a downloaded file.
+    A file the archive calls downloaded but that is gone from disk is flagged, not hidden."""
+    if row["media_status"] == "downloaded":
+        if (media_dir / row["media_path"]).is_file():
+            message["media_file"] = row["media_path"]
+        else:
+            message.update(media_status="missing", incomplete="media_missing_on_disk")
+    return message
 
 
 @router.post(

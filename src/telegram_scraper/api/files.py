@@ -39,5 +39,9 @@ async def get_file(
     if not path.is_relative_to(config.media_dir.resolve()) or not path.is_file():
         raise HTTPException(status_code=404, detail="Media file missing on disk")
     if metadata_only:
-        return {"file_path": str(path), "size": path.stat().st_size}
+        return {
+            "file_path": str(path),
+            "media_file": row["path"],
+            "size": path.stat().st_size,
+        }
     return FileResponse(path, filename=path.name)

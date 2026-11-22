@@ -261,10 +261,11 @@ class Archive:
             (dialog_id,),
         ).fetchone()[0]
 
-    def media_without_file(self, dialog_id: int) -> list[sqlite3.Row]:
+    def media_rows(self, dialog_id: int) -> list[sqlite3.Row]:
         return self.db.execute(
-            """SELECT m.message_id, m.raw, media.status FROM media JOIN messages m USING (dialog_id, message_id)
-               WHERE media.dialog_id = ? AND media.status != 'downloaded' ORDER BY m.message_id""",
+            """SELECT m.message_id, m.raw, media.status, media.path
+               FROM media JOIN messages m USING (dialog_id, message_id)
+               WHERE media.dialog_id = ? ORDER BY m.message_id""",
             (dialog_id,),
         ).fetchall()
 
@@ -295,7 +296,7 @@ class Archive:
         cursor = None
         while True:
             rows = self.db.execute(
-                f"""SELECT m.*, media.status AS media_status FROM messages m
+                f"""SELECT m.*, media.status AS media_status, media.path AS media_path FROM messages m
                     LEFT JOIN media USING (dialog_id, message_id)
                     WHERE m.dialog_id = ? AND m.date BETWEEN ? AND ?
                       AND (? IS NULL OR m.message_id {op} ?)
