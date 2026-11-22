@@ -1,37 +1,41 @@
-[tool.poetry]
+[project]
 name = "telegram-scraper-api"
 version = "0.3.0"
 description = "Local Telegram archive (SQLite + media) with an HTTP API"
-authors = ["Oleksandr Detilie <al.detillier@gmail.com>"]
+authors = [{ name = "Oleksandr Detilie", email = "al.detillier@gmail.com" }]
 readme = "README.md"
-packages = [{include = "telegram_scraper", from = "src"}]
+requires-python = ">=3.12"
+dependencies = [
+    "telethon==1.46.0",
+    "qrcode>=8.2.0",
+    "python-dotenv>=1.0.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pyyaml>=6.0.0",
+    "click>=8.0.0",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.12,<4.0"
-Telethon = "1.46.0"
-qrcode = ">=8.2.0"
-python-dotenv = ">=1.0.0"
-fastapi = ">=0.115.0"
-uvicorn = {extras = ["standard"], version = ">=0.32.0"}
-pyyaml = ">=6.0.0"
-click = ">=8.0.0"
-
-[tool.poetry.group.dev.dependencies]
-ruff = ">=0.14.10"
-pytest = ">=8.0"
-pytest-asyncio = ">=0.24"
-httpx = ">=0.27"
-
-[tool.poetry.scripts]
+[project.scripts]
 tgsc-server = "telegram_scraper.server:main"
 tgsc-auth = "telegram_scraper.authenticate:main"
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
+[dependency-groups]
+dev = [
+    "ruff>=0.14.10",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.13.1,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "telegram_scraper"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's dependency-injection idiom

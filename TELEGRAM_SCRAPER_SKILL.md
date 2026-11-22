@@ -46,13 +46,13 @@ docker run -d -p 127.0.0.1:8000:8000 -e TELEGRAM_API_ID=... -e TELEGRAM_API_HASH
   -e TGSC_ACCOUNT=ACCOUNT_NAME -v /root/telegram-scraper-data:/app/data \
   --name telegram-scraper telegram-scraper:latest
 # Bare metal
-TELEGRAM_API_ID=... TELEGRAM_API_HASH=... tgsc-server --account ACCOUNT_NAME --data-dir ./data
+TELEGRAM_API_ID=... TELEGRAM_API_HASH=... uv run tgsc-server --account ACCOUNT_NAME --data-dir ./data
 ```
 
 **Login (once per account).** A `401` saying "session is not authorized" means
 the login must be done (again).
 
-- **Terminal:** `tgsc-auth ACCOUNT_NAME --data-dir ./data` (interactive).
+- **Terminal:** `uv run tgsc-auth ACCOUNT_NAME --data-dir ./data` (interactive).
 - **API:**
   1. `POST /auth/qr`. Use body `{"force": true}` to replace an existing session.
   2. Render the returned `qr_url` as a QR image for the user: Telegram →
