@@ -1,20 +1,19 @@
 """Dialog search and folder listing API endpoints."""
 
-from fastapi import APIRouter, Query, Depends, HTTPException
-from typing import Annotated, Optional, List
-from pydantic import BaseModel
-from enum import Enum
-from difflib import SequenceMatcher
-from datetime import datetime, timezone
 import asyncio
 import logging
+from datetime import datetime, timezone
+from difflib import SequenceMatcher
+from enum import Enum
+from typing import Annotated
 
-from telethon import TelegramClient
-from telethon.tl.functions.messages import GetDialogFiltersRequest
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from telethon import TelegramClient, utils
 from telethon.errors import FloodWaitError
+from telethon.tl.functions.messages import GetDialogFiltersRequest
 
-from .auth_utils import get_telegram_client
-
+from .deps import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -74,16 +73,19 @@ class DialogInfo(BaseModel):
     id: int
     type: DialogType
     title: str
-    username: Optional[str] = None
+    username: str | None = None
     is_creator: bool = False
     is_verified: bool = False
     is_archived: bool = False
-    message_count: Optional[int] = None  # actual count fetched via messages.getHistory
+    message_count: int | None = None  # actual count fetched via messages.getHistory
+    migrated_to: int | None = (
+        None  # basic group upgraded to this supergroup (marked id)
+    )
     unread_count: int = 0
-    participants_count: Optional[int] = None
-    last_message_date: Optional[str] = None  # ISO 8601
-    last_message_preview: Optional[str] = None
-    created_date: Optional[str] = None  # ISO 8601, channels/groups only
+    participants_count: int | None = None
+    last_message_date: str | None = None  # ISO 8601
+    last_message_preview: str | None = None
+    created_date: str | None = None  # ISO 8601, channels/groups only
 
 
 class DialogSearchResponse(BaseModel):
@@ -92,7 +94,7 @@ class DialogSearchResponse(BaseModel):
     total: int
     offset: int
     limit: int
-    results: List[DialogInfo]
+    results: list[DialogInfo]
 
 
 class FolderDialogRef(BaseModel):
@@ -107,7 +109,7 @@ class FolderInfo(BaseModel):
 
     id: int
     title: str
-    dialogs: Optional[List[FolderDialogRef]] = None
+    dialogs: list[FolderDialogRef] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +197,7 @@ def _dialog_to_info(dialog, my_id: int) -> DialogInfo:
         created_date = entity_date.isoformat()
 
     return DialogInfo(
-        id=entity.id,
+        id=utils.get_peer_id(entity),
         type=_classify_dialog(dialog, my_id),
         title=title,
         username=getattr(entity, "username", None),
@@ -208,16 +210,10 @@ def _dialog_to_info(dialog, my_id: int) -> DialogInfo:
         last_message_date=last_message_date,
         last_message_preview=last_message_preview,
         created_date=created_date,
+        migrated_to=utils.get_peer_id(entity.migrated_to)
+        if getattr(entity, "migrated_to", None)
+        else None,
     )
-
-
-def _extract_peer_id(peer) -> int | None:
-    """Extract the numeric ID from a Telethon InputPeer object."""
-    for attr in ("user_id", "chat_id", "channel_id"):
-        pid = getattr(peer, attr, None)
-        if pid is not None:
-            return pid
-    return None
 
 
 def _sort_key(d: DialogInfo, field: SortField):
@@ -260,16 +256,16 @@ Repeat the parameter for multiple types: `?type=group&type=supergroup`.
 Both `saved` and `me` refer to your Saved Messages dialog.
 
 Examples:
-- `/api/v1/search/dialogs` -- all dialogs
-- `/api/v1/search/dialogs?q=crypto&min_score=0.6`
-- `/api/v1/search/dialogs?type=group&type=supergroup`
-- `/api/v1/search/dialogs?min_messages=100&last_message_after=2024-01-01`
-- `/api/v1/search/dialogs?type=saved` or `?type=me`
+- `/api/v4/search/dialogs` -- all dialogs
+- `/api/v4/search/dialogs?q=crypto&min_score=0.6`
+- `/api/v4/search/dialogs?type=group&type=supergroup`
+- `/api/v4/search/dialogs?min_messages=100&last_message_after=2024-01-01`
+- `/api/v4/search/dialogs?type=saved` or `?type=me`
 """,
 )
 async def search_dialogs(
     query: Annotated[
-        Optional[str],
+        str | None,
         Query(
             alias="q",
             description="Search query on dialog title. Omit to return all.",
@@ -288,57 +284,57 @@ async def search_dialogs(
         ),
     ] = 0.8,
     type: Annotated[
-        Optional[List[DialogType]],
+        list[DialogType] | None,
         Query(description="Filter by dialog type(s). Repeat for multiple."),
     ] = None,
     is_archived: Annotated[
-        Optional[bool],
+        bool | None,
         Query(description="Filter by archive status. Omit to include both."),
     ] = None,
     min_messages: Annotated[
-        Optional[int],
+        int | None,
         Query(ge=0, description="Minimum approximate message count"),
     ] = None,
     max_messages: Annotated[
-        Optional[int],
+        int | None,
         Query(ge=0, description="Maximum approximate message count"),
     ] = None,
     min_participants: Annotated[
-        Optional[int],
+        int | None,
         Query(ge=0, description="Minimum participant/member count"),
     ] = None,
     max_participants: Annotated[
-        Optional[int],
+        int | None,
         Query(ge=0, description="Maximum participant/member count"),
     ] = None,
     last_message_after: Annotated[
-        Optional[str],
+        str | None,
         Query(description="Last message date lower bound (YYYY-MM-DD)"),
     ] = None,
     last_message_before: Annotated[
-        Optional[str],
+        str | None,
         Query(description="Last message date upper bound (YYYY-MM-DD)"),
     ] = None,
     created_after: Annotated[
-        Optional[str],
+        str | None,
         Query(description="Creation date lower bound (YYYY-MM-DD, channels/groups)"),
     ] = None,
     created_before: Annotated[
-        Optional[str],
+        str | None,
         Query(description="Creation date upper bound (YYYY-MM-DD, channels/groups)"),
     ] = None,
     is_creator: Annotated[
-        Optional[bool],
+        bool | None,
         Query(description="Only dialogs you created"),
     ] = None,
     has_username: Annotated[
-        Optional[bool],
+        bool | None,
         Query(
             description="Only dialogs with (true) or without (false) a public @username"
         ),
     ] = None,
     is_verified: Annotated[
-        Optional[bool],
+        bool | None,
         Query(description="Only verified entities"),
     ] = None,
     sort: Annotated[
@@ -357,12 +353,11 @@ async def search_dialogs(
         int,
         Query(ge=0, description="Number of results to skip (for pagination)"),
     ] = 0,
-    client: TelegramClient = Depends(get_telegram_client),
+    client: TelegramClient = Depends(get_client),
 ) -> DialogSearchResponse:
     """
     Search and filter all Telegram dialogs.
 
-    Requires X-Telegram-Username header for authentication.
     """
     # --- Pre-validate date params ---
     lm_after = _parse_date(last_message_after) if last_message_after else None
@@ -482,6 +477,26 @@ async def search_dialogs(
             info = _dialog_to_info(dialog, my_id)
             scored_results.append((score, info, dialog.entity))
 
+        # --- Real message counts (getHistory, limit=0) ---
+        limiter = asyncio.Semaphore(10)
+
+        async def _fill_counts(pairs):
+            async def count(entity):
+                async with limiter:
+                    try:
+                        return (await client.get_messages(entity, limit=0)).total
+                    except Exception:  # noqa: BLE001 -- count stays unknown
+                        return None
+
+            for (info, _), n in zip(
+                pairs, await asyncio.gather(*[count(e) for _, e in pairs])
+            ):
+                info.message_count = n
+
+        # Sorting by message count needs every count first; otherwise only the page's.
+        if sort == SortField.messages:
+            await _fill_counts([(info, entity) for _, info, entity in scored_results])
+
         # --- Sort ---
         if sort_by_score:
             # Primary: score descending, then by chosen sort field as tiebreaker
@@ -503,18 +518,8 @@ async def search_dialogs(
         page = all_infos[offset : offset + limit]
         page_entities = all_entities[offset : offset + limit]
 
-        # --- Fetch actual message counts for the page ---
-        async def _get_count(entity):
-            try:
-                result = await client.get_messages(entity, limit=0)
-                return result.total
-            except Exception:
-                return None
-
-        counts = await asyncio.gather(*[_get_count(e) for e in page_entities])
-        for info, count in zip(page, counts):
-            if count is not None:
-                info.message_count = count
+        if sort != SortField.messages:
+            await _fill_counts(list(zip(page, page_entities)))
 
         return DialogSearchResponse(
             total=total,
@@ -536,7 +541,7 @@ async def search_dialogs(
 
 @router.get(
     "/folders",
-    response_model=List[FolderInfo],
+    response_model=list[FolderInfo],
     response_model_exclude_none=True,
     summary="List custom Telegram folders",
     description="Returns user-created folders only (built-in All Chats/Archive and imported shared folders excluded). "
@@ -550,12 +555,11 @@ async def list_folders(
             description="If true, resolve and include dialog list (id, title) for each folder from include_peers and pinned_peers.",
         ),
     ] = False,
-    client: TelegramClient = Depends(get_telegram_client),
-) -> List[FolderInfo]:
+    client: TelegramClient = Depends(get_client),
+) -> list[FolderInfo]:
     """
     List all Telegram folders.
 
-    Requires X-Telegram-Username header for authentication.
     """
     try:
         result = await client(GetDialogFiltersRequest())
@@ -567,24 +571,19 @@ async def list_folders(
             # Skip built-in: DialogFilterDefault (no id) and any filter with id < 2
             if f_id is None or f_id < 2:
                 continue
-            # # Skip imported shared folders (DialogFilterChatlist); return only user-created (DialogFilter)
-            # if type(f).__name__ == "DialogFilterChatlist":
-            #     continue
 
             # title is a TextWithEntities object on DialogFilter / DialogFilterChatlist
             f_title_obj = getattr(f, "title", None)
             f_title = getattr(f_title_obj, "text", None) if f_title_obj else None
             title = f_title or f"Folder {f_id}"
 
-            dialogs: Optional[List[FolderDialogRef]] = None
+            dialogs: list[FolderDialogRef] | None = None
             if include_dialogs:
                 peers_by_id: dict[int, object] = {}
                 for peer in (getattr(f, "include_peers", None) or []) + (
                     getattr(f, "pinned_peers", None) or []
                 ):
-                    pid = _extract_peer_id(peer)
-                    if pid is not None and pid not in peers_by_id:
-                        peers_by_id[pid] = peer
+                    peers_by_id.setdefault(utils.get_peer_id(peer), peer)
 
                 if not peers_by_id:
                     logger.info(
@@ -597,7 +596,7 @@ async def list_folders(
                     try:
                         entity = await client.get_entity(peer)
                         return FolderDialogRef(
-                            id=entity.id, title=_entity_title(entity)
+                            id=utils.get_peer_id(entity), title=_entity_title(entity)
                         )
                     except Exception as e:
                         logger.warning(

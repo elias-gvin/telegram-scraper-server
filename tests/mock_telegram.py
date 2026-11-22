@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from typing import Optional, List, Any
+from datetime import datetime, timezone
+from typing import Any
 
 try:
-    from telethon.tl.types import PeerUser, PeerChannel
+    from telethon.tl.types import PeerChannel, PeerUser
 except ImportError:
     PeerUser = None  # type: ignore[misc, assignment]
     PeerChannel = None  # type: ignore[misc, assignment]
@@ -24,11 +24,11 @@ class FakeUser:
 
     id: int
     first_name: str = "Test"
-    last_name: Optional[str] = "User"
-    username: Optional[str] = "testuser"
+    last_name: str | None = "User"
+    username: str | None = "testuser"
     bot: bool = False
     verified: bool = False
-    phone: Optional[str] = None
+    phone: str | None = None
 
 
 @dataclass
@@ -37,15 +37,15 @@ class FakeEntity:
 
     id: int
     title: str = "Test Channel"
-    username: Optional[str] = None
+    username: str | None = None
     megagroup: bool = False
     creator: bool = False
     verified: bool = False
-    participants_count: Optional[int] = None
-    date: Optional[datetime] = None
+    participants_count: int | None = None
+    date: datetime | None = None
     # For user-type entities
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
+    first_name: str | None = None
+    last_name: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -62,8 +62,8 @@ class FakeMessageFwdHeader:
     """
 
     from_id: Any = None  # PeerUser(user_id) or PeerChannel(channel_id) or None
-    from_name: Optional[str] = None
-    date: Optional[datetime] = None
+    from_name: str | None = None
+    date: datetime | None = None
     saved_from_peer: Any = None
 
 
@@ -71,9 +71,9 @@ class FakeMessageFwdHeader:
 class FakeMessageReplyHeader:
     """Mimics Telethon MessageReplyHeader used for replies/quotes."""
 
-    reply_to_msg_id: Optional[int] = None
-    quote_text: Optional[str] = None
-    quote_offset: Optional[int] = None
+    reply_to_msg_id: int | None = None
+    quote_text: str | None = None
+    quote_offset: int | None = None
 
 
 @dataclass
@@ -88,12 +88,12 @@ class FakeMessage:
     media: None = None
     reply_to: None = None
     reply_to_msg_id: None = None
-    post_author: Optional[str] = None
-    fwd_from: Optional[FakeMessageFwdHeader] = None
+    post_author: str | None = None
+    fwd_from: FakeMessageFwdHeader | None = None
     edit_date: None = None
     file: None = None
 
-    _sender: Optional[FakeUser] = field(default=None, repr=False)
+    _sender: FakeUser | None = field(default=None, repr=False)
 
     async def get_sender(self):
         return self._sender or FakeUser(id=self.sender_id)
@@ -112,8 +112,8 @@ class FakeDialog:
     """Mimics telethon Dialog returned by client.iter_dialogs()."""
 
     entity: FakeEntity
-    message: Optional[FakeMessage] = None
-    date: Optional[datetime] = field(default_factory=lambda: datetime.now(timezone.utc))
+    message: FakeMessage | None = None
+    date: datetime | None = field(default_factory=lambda: datetime.now(timezone.utc))
     unread_count: int = 0
     archived: bool = False
 
@@ -152,9 +152,9 @@ class FakeTotalList(list):
 class FakeInputPeer:
     """Mimics InputPeerUser / InputPeerChat / InputPeerChannel."""
 
-    user_id: Optional[int] = None
-    chat_id: Optional[int] = None
-    channel_id: Optional[int] = None
+    user_id: int | None = None
+    chat_id: int | None = None
+    channel_id: int | None = None
 
 
 @dataclass
@@ -166,16 +166,16 @@ class FakeDialogFilterTitle:
 class FakeDialogFilter:
     id: int
     title: FakeDialogFilterTitle
-    include_peers: List = field(default_factory=list)
-    pinned_peers: List = field(default_factory=list)
-    exclude_peers: List = field(default_factory=list)
+    include_peers: list = field(default_factory=list)
+    pinned_peers: list = field(default_factory=list)
+    exclude_peers: list = field(default_factory=list)
 
 
 @dataclass
 class FakeDialogFilterDefault:
     """Mimics DialogFilterDefault which has no id attribute."""
 
-    pass  # no `id` attr
+    # no `id` attr
 
 
 @dataclass
@@ -200,23 +200,23 @@ class MockTelegramClient:
 
     def __init__(
         self,
-        dialogs: Optional[List[FakeDialog]] = None,
-        messages: Optional[List[FakeMessage]] = None,
-        me: Optional[FakeUser] = None,
-        folders: Optional[List] = None,
+        dialogs: list[FakeDialog] | None = None,
+        messages: list[FakeMessage] | None = None,
+        me: FakeUser | None = None,
+        folders: list | None = None,
     ):
         self.dialogs = dialogs or []
         self.messages = messages or []
         self._me = me or FakeUser(id=999, first_name="Test", username="testuser")
         self._folders = folders or []
-        self._messages_by_dialog: dict[int, List[FakeMessage]] = {}
+        self._messages_by_dialog: dict[int, list[FakeMessage]] = {}
         # Explicit overrides for message counts returned by get_messages().
         # If not set for an entity, falls back to the dialog's top message ID.
         self._message_counts: dict[int, int] = {}
 
     # -- helpers for test setup --
 
-    def set_messages(self, dialog_id: int, messages: List[FakeMessage]):
+    def set_messages(self, dialog_id: int, messages: list[FakeMessage]):
         """Assign messages for a specific dialog."""
         self._messages_by_dialog[dialog_id] = messages
 

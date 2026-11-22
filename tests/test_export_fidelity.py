@@ -40,6 +40,7 @@ CATALOG = [
         2,
         "see docs, bold",
         entities=[
+            t.MessageEntityItalic(offset=0, length=3),
             t.MessageEntityTextUrl(offset=4, length=4, url="https://example.com/docs"),
             t.MessageEntityBold(offset=10, length=4),
         ],
@@ -164,6 +165,7 @@ EXPECTED = {
     },
     2: {
         "entities": [
+            {"type": "italic", "offset": 0, "length": 3},
             {
                 "type": "text_url",
                 "offset": 4,

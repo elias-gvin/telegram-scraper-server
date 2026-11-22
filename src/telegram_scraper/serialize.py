@@ -77,7 +77,12 @@ def display_name(p: dict | None) -> str | None:
 
 
 def _clean(d: dict) -> dict:
-    return {k: v for k, v in d.items() if k != "_" and v not in (None, False, [], "")}
+    """Drop the TL type tag and empty values (but keep 0 and 0.0)."""
+    return {
+        k: v
+        for k, v in d.items()
+        if k != "_" and v is not None and v is not False and v != [] and v != ""
+    }
 
 
 def _text(value) -> str:

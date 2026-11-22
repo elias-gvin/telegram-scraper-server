@@ -57,6 +57,15 @@ MIGRATIONS = [
         PRIMARY KEY (dialog_id, message_id)
     );
     """,
+    """
+    -- What could not be archived; message_id 0 = the dialog as a whole
+    CREATE TABLE problems (
+        dialog_id  INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        problem    TEXT NOT NULL,
+        PRIMARY KEY (dialog_id, message_id)
+    );
+    """,
 ]
 
 
@@ -192,12 +201,31 @@ class Archive:
             )
 
     def set_media(
-        self, dialog_id: int, message_id: int, status: str, path: str | None = None
+        self,
+        dialog_id: int,
+        message_id: int,
+        status: str,
+        path: str | None = None,
+        problem: str | None = None,
     ):
         with self.db:
             self.db.execute(
                 "UPDATE media SET status = ?, path = ? WHERE dialog_id = ? AND message_id = ?",
                 (status, path, dialog_id, message_id),
+            )
+            self.set_problem(dialog_id, message_id, problem)
+
+    def set_problem(self, dialog_id: int, message_id: int, problem: str | None):
+        """Record (or clear, with None) why a message is not fully archived."""
+        if problem is None:
+            self.db.execute(
+                "DELETE FROM problems WHERE dialog_id = ? AND message_id = ?",
+                (dialog_id, message_id),
+            )
+        else:
+            self.db.execute(
+                "INSERT OR REPLACE INTO problems VALUES (?, ?, ?)",
+                (dialog_id, message_id, problem),
             )
 
     # --- reads ---------------------------------------------------------------
@@ -219,9 +247,23 @@ class Archive:
         ).fetchone()
         return row[0] if row else None
 
+    def problems(self, dialog_id: int) -> list[dict]:
+        rows = self.db.execute(
+            "SELECT * FROM problems WHERE dialog_id = ? ORDER BY message_id",
+            (dialog_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def message_count(self, dialog_id: int) -> int:
+        """Archived messages that still exist on Telegram (as far as we know)."""
+        return self.db.execute(
+            "SELECT count(*) FROM messages WHERE dialog_id = ? AND deleted = 0",
+            (dialog_id,),
+        ).fetchone()[0]
+
     def media_without_file(self, dialog_id: int) -> list[sqlite3.Row]:
         return self.db.execute(
-            """SELECT m.message_id, m.raw FROM media JOIN messages m USING (dialog_id, message_id)
+            """SELECT m.message_id, m.raw, media.status FROM media JOIN messages m USING (dialog_id, message_id)
                WHERE media.dialog_id = ? AND media.status != 'downloaded' ORDER BY m.message_id""",
             (dialog_id,),
         ).fetchall()

@@ -15,6 +15,10 @@ class NotAuthorized(RuntimeError):
     pass
 
 
+class DialogNotFound(LookupError):
+    pass
+
+
 def check_account_name(name: str) -> str:
     if not ACCOUNT_NAME.match(name):
         raise ValueError(
@@ -52,8 +56,12 @@ class TelegramHolder:
         async with self._lock:
             if self._client is None or not self._client.is_connected():
                 client = await connect(self.session_path, self.api_id, self.api_hash)
-                if self.on_connect:
-                    await self.on_connect(client)
+                try:
+                    if self.on_connect:
+                        await self.on_connect(client)
+                except BaseException:
+                    await client.disconnect()
+                    raise
                 self._client = client
             return self._client
 
@@ -71,7 +79,12 @@ async def resolve(client, dialog_id: int):
         return await client.get_entity(dialog_id)
     except ValueError:
         await client.get_dialogs()
+    try:
         return await client.get_entity(dialog_id)
+    except ValueError as e:
+        raise DialogNotFound(
+            f"Dialog {dialog_id} not found (use the marked id from /search/dialogs)"
+        ) from e
 
 
 def peer_fields(entity) -> dict:

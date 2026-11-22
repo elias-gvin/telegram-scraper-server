@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 from telethon import utils
 from telethon._updates import EntityCache as MbEntityCache
+from telethon.helpers import TotalList
 from telethon.tl import types
 from telethon.tl.patched import Message, MessageService
 
@@ -124,6 +125,7 @@ class FakeTelegram:
         ] = {}  # channel marked id -> old chat marked id
         self.fail_after: int | None = None  # raise after yielding this many messages
         self.fail_download: set[int] = set()  # message ids whose download raises
+        self.extra_total = 0  # messages Telegram counts but never returns
         self.connected = True
         # Read by Message._finish_init:
         self._self_id = ME.id
@@ -224,7 +226,12 @@ class FakeTelegram:
                 for i in (ids if many else [ids])
             ]
             return found if many else found[0]
-        return [m async for m in self.iter_messages(entity, limit, **kw)]
+        msgs = [m async for m in self.iter_messages(entity, limit or None, **kw)]
+        result = TotalList([] if limit == 0 else msgs)
+        result.total = (
+            len(self.chats.get(utils.get_peer_id(entity), {})) + self.extra_total
+        )
+        return result
 
     async def download_media(self, message, file=None, **kw):
         if message.id in self.fail_download:

@@ -52,16 +52,9 @@ class SyncReport:
     reached_start: bool = False
     covered_from: str | None = None  # date of the oldest archived message
     migrated_from: int | None = None  # old basic group, archived as its own dialog
+    # Everything currently not fully archived in this dialog (not only from this call).
+    # message_id 0 = a problem with the dialog as a whole.
     problems: list[dict] = field(default_factory=list)
-
-    def problem(self, message_id: int, what: str, dialog_id: int | None = None):
-        entry = {
-            "dialog_id": dialog_id or self.dialog_id,
-            "message_id": message_id,
-            "problem": what,
-        }
-        if entry not in self.problems:
-            self.problems.append(entry)
 
 
 @dataclass
@@ -84,8 +77,12 @@ async def sync_dialog(
     since: datetime | None = None,
     refresh: bool = True,
     full: bool = False,
+    media: bool = True,
 ) -> SyncReport:
-    """Bring the archive of `entity` up to date. `since=None` means the whole history."""
+    """Bring the archive of `entity` up to date. `since=None` means the whole history.
+
+    refresh=False skips re-reading archived messages; media=False skips downloads.
+    """
     did = utils.get_peer_id(entity)
     async with _locks[did]:
         migrated_from = await _migrated_from(client, entity)
@@ -114,7 +111,10 @@ async def sync_dialog(
             await _refresh(
                 ctx, entity, state["low_id"], state["high_id"], settings, full
             )
-        await _download_media(ctx, entity, settings, media_dir)
+        if media:
+            await _download_media(ctx, entity, settings, media_dir)
+        if reached_start:
+            await _check_count(ctx, entity)
         archive.finish_sync(
             did, reached_start, int(datetime.now(timezone.utc).timestamp())
         )
@@ -123,6 +123,7 @@ async def sync_dialog(
         report.reached_start = bool(final["reached_start"])
         if final["low_id"] is not None:
             report.covered_from = iso(archive.message_date(did, final["low_id"]))
+        report.problems = archive.problems(did)
 
     if migrated_from is not None:
         old = await sync_dialog(
@@ -134,6 +135,7 @@ async def sync_dialog(
             since=since,
             refresh=refresh,
             full=full,
+            media=media,
         )
         report.problems += old.problems
     return report
@@ -188,8 +190,7 @@ async def _save(ctx: _Context, messages) -> list[int]:
             data = json.loads(raw)
             if info := media_files.media_info(data.get("media")):
                 ctx.archive.expect_media(ctx.dialog_id, msg.id, info.key)
-            if why := incomplete(data):
-                ctx.report.problem(msg.id, why)
+            ctx.archive.set_problem(ctx.dialog_id, msg.id, incomplete(data))
         ids = [m.id for m in messages]
         ctx.archive.extend_coverage(ctx.dialog_id, min(ids), max(ids))
     return ids
@@ -234,11 +235,12 @@ async def _refresh(
     """Re-read already archived messages; anything Telegram no longer returns is marked deleted."""
     if not full and settings.refresh_days == 0:
         return
-    since = (
-        None
-        if full
-        else datetime.now(timezone.utc) - timedelta(days=settings.refresh_days)
-    )
+    # Whole seconds: Telegram dates and archived dates are whole seconds too, so the
+    # window read from Telegram and the window checked for deletions are identical.
+    since = None
+    if not full:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        since = now - timedelta(days=settings.refresh_days)
     seen, _ = await _fetch(
         ctx,
         ctx.client.iter_messages(entity, max_id=high_id + 1, min_id=low_id - 1),
@@ -258,11 +260,21 @@ async def _download_media(
     wanted = {}
     for row in ctx.archive.media_without_file(ctx.dialog_id):
         info = media_files.media_info(json.loads(row["raw"]).get("media"))
-        if why := media_files.skip_reason(info, settings):
-            ctx.archive.set_media(ctx.dialog_id, row["message_id"], f"skipped:{why}")
+        if (
+            info is None
+        ):  # an edit removed the file (e.g. expired self-destructing media)
+            status = "unavailable"
+        elif why := media_files.skip_reason(info, settings):
+            status = f"skipped:{why}"
             ctx.report.media_skipped += 1
         else:
             wanted[row["message_id"]] = info
+            continue
+        if status != row["status"]:
+            problem = "media_unavailable" if info is None else None
+            ctx.archive.set_media(
+                ctx.dialog_id, row["message_id"], status, problem=problem
+            )
 
     ids = list(wanted)
     for start in range(0, len(ids), 100):
@@ -279,8 +291,22 @@ async def _download_media(
                 )
                 ctx.report.media_downloaded += 1
             except Exception as e:  # noqa: BLE001 -- recorded on the message and reported
+                error = f"{type(e).__name__}: {e}"
                 ctx.archive.set_media(
-                    ctx.dialog_id, mid, f"failed:{type(e).__name__}: {e}"
+                    ctx.dialog_id,
+                    mid,
+                    f"failed:{error}",
+                    problem=f"media_failed: {error}",
                 )
                 ctx.report.media_failed += 1
-                ctx.report.problem(mid, f"media_failed: {type(e).__name__}: {e}")
+
+
+async def _check_count(ctx: _Context, entity):
+    """Loud last check: the archive must not hold fewer messages than Telegram reports."""
+    total = (await ctx.client.get_messages(entity, limit=0)).total
+    archived = ctx.archive.message_count(ctx.dialog_id)
+    problem = None
+    if archived < total:
+        problem = f"count_mismatch: Telegram has {total} messages, archive {archived}"
+    with ctx.archive.transaction():
+        ctx.archive.set_problem(ctx.dialog_id, 0, problem)

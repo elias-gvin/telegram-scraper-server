@@ -203,3 +203,87 @@ def test_archive_refuses_a_different_account(tmp_path):
     archive.bind_account(1)
     with pytest.raises(AccountMismatch):
         archive.bind_account(2)
+
+
+async def test_refresh_window_edge_does_not_invent_deletions(env, monkeypatch):
+    """A message dated exactly on the refresh cutoff second is read, so never marked deleted."""
+    from telegram_scraper import sync as sync_module
+
+    fixed_now = NOW.replace(microsecond=700_000)
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    fake, _, settings, sync, history = env
+    cutoff = NOW - timedelta(days=settings.refresh_days)
+    fake.add(
+        CHANNEL,
+        text_msg(CHANNEL, 1, "old", date=cutoff - timedelta(days=1)),
+        text_msg(CHANNEL, 2, "on the edge", date=cutoff),
+        text_msg(CHANNEL, 3, "new", date=NOW),
+    )
+    monkeypatch.setattr(sync_module, "datetime", FixedDatetime)
+    await sync()
+    report = await sync()
+    assert report.deleted_messages == 0
+    assert not any(m.get("deleted") for m in history())
+
+
+async def test_problems_persist_across_syncs(env):
+    fake, _, _, sync, _ = env
+    fake.add(CHANNEL, *messages(range(1, 4)))
+    fake.edit(CHANNEL, 2, media=t.MessageMediaUnsupported())
+    first = await sync()
+    second = await sync()  # message 2 is not re-read here, yet still unarchivable
+    expected = [
+        {
+            "dialog_id": CHAT_ID,
+            "message_id": 2,
+            "problem": "unsupported_by_telegram_library",
+        }
+    ]
+    assert first.problems == expected and second.problems == expected
+
+
+async def test_missing_messages_fail_the_count_check(env):
+    fake, _, _, sync, _ = env
+    fake.add(CHANNEL, *messages(range(1, 4)))
+    fake.extra_total = 2  # Telegram says 5, but only returns 3
+    report = await sync()
+    assert report.problems == [
+        {
+            "dialog_id": CHAT_ID,
+            "message_id": 0,
+            "problem": "count_mismatch: Telegram has 5 messages, archive 3",
+        }
+    ]
+    fake.extra_total = 0
+    assert (await sync()).problems == []
+
+
+async def test_media_that_disappears_does_not_break_sync(env):
+    fake, archive, settings, sync, history = env
+    fake.add(CHANNEL, *messages(range(1, 2)))
+    fake.edit(CHANNEL, 1, media=photo())
+    await sync()  # downloads are off: skipped
+    fake.edit(
+        CHANNEL, 1, media=t.MessageMediaPhoto(photo=None, ttl_seconds=5)
+    )  # expired
+    settings.download_media = True
+    report = await sync()
+    assert archive.media(CHAT_ID, 1)["status"] == "unavailable"
+    assert report.problems[0]["problem"] == "media_unavailable"
+    assert history()[0]["incomplete"] == "media_unavailable"
+
+
+async def test_media_step_can_be_skipped(env):
+    fake, archive, settings, sync, _ = env
+    settings.download_media = True
+    fake.add(CHANNEL, *messages(range(1, 2)))
+    fake.edit(CHANNEL, 1, media=photo())
+    await sync(media=False)
+    assert archive.media(CHAT_ID, 1)["status"] == "pending"
+    await sync()
+    assert archive.media(CHAT_ID, 1)["status"] == "downloaded"

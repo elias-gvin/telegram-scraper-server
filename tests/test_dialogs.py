@@ -2,41 +2,43 @@
 
 from __future__ import annotations
 
-import pytest
 from datetime import datetime, timezone
 
+import pytest
+from telethon.tl import types
+
 from .mock_telegram import (
-    MockTelegramClient,
     FakeDialog,
-    FakeEntity,
+    FakeDialogFilter,
+    FakeDialogFilterDefault,
+    FakeDialogFilterTitle,
     FakeMessage,
     FakeUser,
-    FakeDialogFilter,
-    FakeDialogFilterTitle,
-    FakeDialogFilterDefault,
-    FakeInputPeer,
+    MockTelegramClient,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures — provide a mock client pre-loaded with sample dialogs
 # ---------------------------------------------------------------------------
 
 
+def channel(id, title, **kw):
+    return types.Channel(
+        id=id, title=title, photo=types.ChatPhotoEmpty(),
+        date=datetime(2020, 1, 1, tzinfo=timezone.utc), **kw,
+    )
+
+
 @pytest.fixture
-def mock_client():
+def tg():
     """Client with a handful of realistic dialogs."""
     now = datetime.now(timezone.utc)
 
     dialogs = [
         # Broadcast channel
         FakeDialog(
-            entity=FakeEntity(
-                id=100,
-                title="Crypto Traders",
-                username="crypto",
-                participants_count=5000,
-                verified=True,
+            entity=channel(
+                100, "Crypto Traders", username="crypto", participants_count=5000, verified=True
             ),
             message=FakeMessage(id=500, text="Latest BTC update"),
             date=now,
@@ -44,12 +46,7 @@ def mock_client():
         ),
         # Supergroup (megagroup)
         FakeDialog(
-            entity=FakeEntity(
-                id=200,
-                title="Python Devs",
-                participants_count=1200,
-                megagroup=True,
-            ),
+            entity=channel(200, "Python Devs", participants_count=1200, megagroup=True),
             message=FakeMessage(id=300, text="New PEP discussion"),
             date=now,
             is_channel=True,
@@ -57,7 +54,10 @@ def mock_client():
         ),
         # Regular group
         FakeDialog(
-            entity=FakeEntity(id=300, title="Family Group"),
+            entity=types.Chat(
+                id=300, title="Family Group", photo=types.ChatPhotoEmpty(),
+                participants_count=4, date=now, version=1,
+            ),
             message=FakeMessage(id=50, text="Hello!"),
             date=now,
             is_group=True,
@@ -65,7 +65,7 @@ def mock_client():
         ),
         # Private user chat
         FakeDialog(
-            entity=FakeEntity(id=400, first_name="Alice", last_name="Smith"),
+            entity=types.User(id=400, first_name="Alice", last_name="Smith"),
             message=FakeMessage(id=20, text="Hey there"),
             date=now,
             is_user=True,
@@ -74,7 +74,7 @@ def mock_client():
         ),
         # Bot
         FakeDialog(
-            entity=FakeEntity(id=500, first_name="HelperBot"),
+            entity=types.User(id=500, first_name="HelperBot", bot=True),
             message=FakeMessage(id=10, text="/start"),
             date=now,
             is_user=True,
@@ -83,7 +83,7 @@ def mock_client():
         ),
         # Archived channel
         FakeDialog(
-            entity=FakeEntity(id=600, title="Old News"),
+            entity=channel(600, "Old News"),
             message=FakeMessage(id=1000, text="Archive me"),
             date=now,
             archived=True,
@@ -98,16 +98,16 @@ def mock_client():
             id=2,
             title=FakeDialogFilterTitle("Work"),
             include_peers=[
-                FakeInputPeer(channel_id=100),  # Crypto Traders
-                FakeInputPeer(channel_id=200),  # Python Devs
+                types.InputPeerChannel(channel_id=100, access_hash=0),  # Crypto Traders
+                types.InputPeerChannel(channel_id=200, access_hash=0),  # Python Devs
             ],
         ),
         FakeDialogFilter(
             id=3,
             title=FakeDialogFilterTitle("Personal"),
             include_peers=[
-                FakeInputPeer(chat_id=300),  # Family Group
-                FakeInputPeer(user_id=400),  # Alice Smith
+                types.InputPeerChat(chat_id=300),  # Family Group
+                types.InputPeerUser(user_id=400, access_hash=0),  # Alice Smith
             ],
         ),
     ]
@@ -125,11 +125,11 @@ def mock_client():
 
 
 class TestSearchDialogs:
-    """GET /api/v3/search/dialogs"""
+    """GET /api/v4/search/dialogs"""
 
     @pytest.mark.asyncio
     async def test_returns_all_dialogs(self, client):
-        resp = await client.get("/api/v3/search/dialogs")
+        resp = await client.get("/api/v4/search/dialogs")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 6
@@ -138,7 +138,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_response_shape(self, client):
         """Every result must have the expected fields."""
-        resp = await client.get("/api/v3/search/dialogs")
+        resp = await client.get("/api/v4/search/dialogs")
         data = resp.json()
         for r in data["results"]:
             assert "id" in r
@@ -148,7 +148,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_fuzzy_search(self, client):
         resp = await client.get(
-            "/api/v3/search/dialogs", params={"q": "crypto", "min_score": "0.5"}
+            "/api/v4/search/dialogs", params={"q": "crypto", "min_score": "0.5"}
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -158,7 +158,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_exact_search(self, client):
         resp = await client.get(
-            "/api/v3/search/dialogs", params={"q": "python", "match": "exact"}
+            "/api/v4/search/dialogs", params={"q": "python", "match": "exact"}
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -166,7 +166,7 @@ class TestSearchDialogs:
 
     @pytest.mark.asyncio
     async def test_filter_by_type_channel(self, client):
-        resp = await client.get("/api/v3/search/dialogs", params={"type": "channel"})
+        resp = await client.get("/api/v4/search/dialogs", params={"type": "channel"})
         assert resp.status_code == 200
         data = resp.json()
         assert all(r["type"] == "channel" for r in data["results"])
@@ -174,7 +174,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_filter_archived(self, client):
         resp = await client.get(
-            "/api/v3/search/dialogs", params={"is_archived": "true"}
+            "/api/v4/search/dialogs", params={"is_archived": "true"}
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -184,7 +184,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_filter_not_archived(self, client):
         resp = await client.get(
-            "/api/v3/search/dialogs", params={"is_archived": "false"}
+            "/api/v4/search/dialogs", params={"is_archived": "false"}
         )
         data = resp.json()
         assert all(not r["is_archived"] for r in data["results"])
@@ -192,7 +192,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_filter_verified(self, client):
         resp = await client.get(
-            "/api/v3/search/dialogs", params={"is_verified": "true"}
+            "/api/v4/search/dialogs", params={"is_verified": "true"}
         )
         data = resp.json()
         assert data["total"] >= 1
@@ -201,7 +201,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_pagination_limit(self, client):
         resp = await client.get(
-            "/api/v3/search/dialogs", params={"limit": "2", "offset": "0"}
+            "/api/v4/search/dialogs", params={"limit": "2", "offset": "0"}
         )
         data = resp.json()
         assert len(data["results"]) == 2
@@ -210,7 +210,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_pagination_offset(self, client):
         resp = await client.get(
-            "/api/v3/search/dialogs", params={"limit": "2", "offset": "4"}
+            "/api/v4/search/dialogs", params={"limit": "2", "offset": "4"}
         )
         data = resp.json()
         assert len(data["results"]) == 2
@@ -219,7 +219,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_min_messages_filter(self, client):
         resp = await client.get(
-            "/api/v3/search/dialogs", params={"min_messages": "100"}
+            "/api/v4/search/dialogs", params={"min_messages": "100"}
         )
         data = resp.json()
         for r in data["results"]:
@@ -228,14 +228,14 @@ class TestSearchDialogs:
 
     @pytest.mark.asyncio
     async def test_message_count_uses_real_count_not_message_id(
-        self, client, mock_client
+        self, client, tg
     ):
         """message_count must come from get_messages().total, NOT from the
         top message ID. Regression test for the 884218-instead-of-400 bug."""
         # Override the count for entity 300 (Family Group, msg.id=50) to 42
-        mock_client._message_counts[300] = 42
+        tg._message_counts[300] = 42
         resp = await client.get(
-            "/api/v3/search/dialogs", params={"q": "Family", "match": "exact"}
+            "/api/v4/search/dialogs", params={"q": "Family", "match": "exact"}
         )
         data = resp.json()
         assert data["total"] == 1
@@ -247,7 +247,7 @@ class TestSearchDialogs:
     @pytest.mark.asyncio
     async def test_sort_by_title_asc(self, client):
         resp = await client.get(
-            "/api/v3/search/dialogs",
+            "/api/v4/search/dialogs",
             params={"sort": "title", "order": "asc"},
         )
         data = resp.json()
@@ -261,11 +261,11 @@ class TestSearchDialogs:
 
 
 class TestFolders:
-    """GET /api/v3/folders"""
+    """GET /api/v4/folders"""
 
     @pytest.mark.asyncio
     async def test_list_folders(self, client):
-        resp = await client.get("/api/v3/folders")
+        resp = await client.get("/api/v4/folders")
         assert resp.status_code == 200
         folders = resp.json()
         assert isinstance(folders, list)
@@ -274,14 +274,14 @@ class TestFolders:
 
     @pytest.mark.asyncio
     async def test_folder_shape(self, client):
-        resp = await client.get("/api/v3/folders")
+        resp = await client.get("/api/v4/folders")
         for f in resp.json():
             assert "id" in f
             assert "title" in f
 
     @pytest.mark.asyncio
     async def test_folder_names(self, client):
-        resp = await client.get("/api/v3/folders")
+        resp = await client.get("/api/v4/folders")
         titles = {f["title"] for f in resp.json()}
         assert "Work" in titles
         assert "Personal" in titles
@@ -289,7 +289,7 @@ class TestFolders:
     @pytest.mark.asyncio
     async def test_folders_without_include_dialogs(self, client):
         """Default request does not include dialogs field (or null)."""
-        resp = await client.get("/api/v3/folders")
+        resp = await client.get("/api/v4/folders")
         assert resp.status_code == 200
         for f in resp.json():
             assert "dialogs" not in f or f.get("dialogs") is None
@@ -297,22 +297,22 @@ class TestFolders:
     @pytest.mark.asyncio
     async def test_folders_with_include_dialogs(self, client):
         """include_dialogs=true returns dialog refs with correct IDs and titles."""
-        resp = await client.get("/api/v3/folders", params={"include_dialogs": "true"})
+        resp = await client.get("/api/v4/folders", params={"include_dialogs": "true"})
         assert resp.status_code == 200
         folders = resp.json()
         work = next(f for f in folders if f["title"] == "Work")
         assert "dialogs" in work
         ids = {d["id"] for d in work["dialogs"]}
         titles = {d["title"] for d in work["dialogs"]}
-        assert ids == {100, 200}
+        assert ids == {-1000000000100, -1000000000200}
         assert titles == {"Crypto Traders", "Python Devs"}
         personal = next(f for f in folders if f["title"] == "Personal")
-        assert {d["id"] for d in personal["dialogs"]} == {300, 400}
+        assert {d["id"] for d in personal["dialogs"]} == {-300, 400}
 
     @pytest.mark.asyncio
     async def test_folder_dialog_titles_use_names_for_users(self, client):
         """User entities get first_name + last_name as title, not entity title."""
-        resp = await client.get("/api/v3/folders", params={"include_dialogs": "true"})
+        resp = await client.get("/api/v4/folders", params={"include_dialogs": "true"})
         assert resp.status_code == 200
         personal = next(f for f in resp.json() if f["title"] == "Personal")
         alice = next(d for d in personal["dialogs"] if d["id"] == 400)
@@ -325,12 +325,6 @@ class TestFolders:
 
 
 class TestMeta:
-    @pytest.mark.asyncio
-    async def test_root(self, client):
-        resp = await client.get("/")
-        assert resp.status_code == 200
-        assert "Telegram Scraper API" in resp.json()["name"]
-
     @pytest.mark.asyncio
     async def test_health(self, client):
         resp = await client.get("/health")

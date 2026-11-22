@@ -6,65 +6,24 @@ import asyncio
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import pytest_asyncio
-import yaml
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from telegram_scraper.server import create_app
-from telegram_scraper.config import ServerConfig, RuntimeSettings
 from telegram_scraper.api import auth as api_qr_auth
 
+from .conftest import TOKEN
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def tmp_data_dir(tmp_path):
-    data = tmp_path / "data"
-    data.mkdir()
-    (data / "dialogs").mkdir()
-    (data / "sessions").mkdir()
-
-    settings = {
-        "download_media": False,
-        "max_media_size_mb": None,
-        "telegram_batch_size": 50,
-    }
-    with open(data / "settings.yaml", "w") as f:
-        yaml.dump(settings, f)
-    return data
-
-
-@pytest.fixture
-def server_config(tmp_data_dir):
-    return ServerConfig(
-        api_id="12345",
-        api_hash="fakehash",
-        data_dir=tmp_data_dir,
-        settings=RuntimeSettings(
-            download_media=False,
-            telegram_batch_size=50,
-            max_media_size_mb=None,
-        ),
-        settings_path=tmp_data_dir / "settings.yaml",
-    )
-
-
-@pytest.fixture
-def app(server_config):
-    """Create the real FastAPI app (no dependency overrides — auth endpoints
-    create their own TelegramClient, which we mock at the Telethon level)."""
-    application = create_app(server_config)
-    yield application
-
-
 @pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"Authorization": f"Bearer {TOKEN}"}
+    ) as c:
         yield c
 
     # Cleanup any leftover QR sessions after each test
@@ -129,7 +88,7 @@ def _make_mock_client(qr_login: FakeQRLogin):
 
 
 class TestStartQRAuth:
-    """POST /api/v3/auth/qr"""
+    """POST /api/v4/auth/qr"""
 
     async def test_start_returns_token_and_url(self, client, server_config):
         fake_qr = FakeQRLogin()
@@ -138,7 +97,7 @@ class TestStartQRAuth:
         with patch(
             "telegram_scraper.api.auth.TelegramClient", return_value=mock_client
         ):
-            resp = await client.post("/api/v3/auth/qr", json={"username": "newuser"})
+            resp = await client.post("/api/v4/auth/qr", json={})
 
         assert resp.status_code == 200
         data = resp.json()
@@ -150,23 +109,16 @@ class TestStartQRAuth:
         fake_qr.resolve()
         await asyncio.sleep(0.1)
 
-    async def test_start_rejects_empty_username(self, client):
-        with patch(
-            "telegram_scraper.api.auth.TelegramClient", return_value=AsyncMock()
-        ):
-            resp = await client.post("/api/v3/auth/qr", json={"username": "  "})
-        assert resp.status_code == 400
-
     async def test_start_rejects_existing_session(self, client, server_config):
         """If a .session file already exists, return 409."""
-        (server_config.sessions_dir / "existing.session").touch()
-        resp = await client.post("/api/v3/auth/qr", json={"username": "existing"})
+        (server_config.sessions_dir / "testuser.session").touch()
+        resp = await client.post("/api/v4/auth/qr", json={})
         assert resp.status_code == 409
         assert "force" in resp.json()["detail"].lower()
 
     async def test_force_reauth_removes_old_session(self, client, server_config):
         """With force=true, an existing session should be deleted and re-auth started."""
-        (server_config.sessions_dir / "reauth.session").touch()
+        (server_config.sessions_dir / "testuser.session").touch()
 
         fake_qr = FakeQRLogin()
         mock_client = _make_mock_client(fake_qr)
@@ -175,7 +127,7 @@ class TestStartQRAuth:
             "telegram_scraper.api.auth.TelegramClient", return_value=mock_client
         ):
             resp = await client.post(
-                "/api/v3/auth/qr", json={"username": "reauth", "force": True}
+                "/api/v4/auth/qr", json={"force": True}
             )
 
         assert resp.status_code == 200
@@ -184,7 +136,7 @@ class TestStartQRAuth:
         assert data["qr_url"] == fake_qr.url
 
         # Old session file should have been deleted
-        assert not (server_config.sessions_dir / "reauth.session").exists()
+        assert not (server_config.sessions_dir / "testuser.session").exists()
 
         fake_qr.resolve()
         await asyncio.sleep(0.1)
@@ -197,12 +149,12 @@ class TestStartQRAuth:
         with patch(
             "telegram_scraper.api.auth.TelegramClient", return_value=mock_client
         ):
-            resp = await client.post("/api/v3/auth/qr", json={"username": "failuser"})
+            resp = await client.post("/api/v4/auth/qr", json={})
         assert resp.status_code == 502
 
 
 class TestQRStatus:
-    """GET /api/v3/auth/qr/{token}"""
+    """GET /api/v4/auth/qr/{token}"""
 
     async def test_pending_status_includes_qr_url(self, client):
         fake_qr = FakeQRLogin()
@@ -211,10 +163,10 @@ class TestQRStatus:
         with patch(
             "telegram_scraper.api.auth.TelegramClient", return_value=mock_client
         ):
-            start = await client.post("/api/v3/auth/qr", json={"username": "polluser"})
+            start = await client.post("/api/v4/auth/qr", json={})
         token = start.json()["token"]
 
-        resp = await client.get(f"/api/v3/auth/qr/{token}")
+        resp = await client.get(f"/api/v4/auth/qr/{token}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "pending"
@@ -230,14 +182,14 @@ class TestQRStatus:
         with patch(
             "telegram_scraper.api.auth.TelegramClient", return_value=mock_client
         ):
-            start = await client.post("/api/v3/auth/qr", json={"username": "scanuser"})
+            start = await client.post("/api/v4/auth/qr", json={})
         token = start.json()["token"]
 
         # Simulate successful scan
         fake_qr.resolve()
         await asyncio.sleep(0.2)
 
-        resp = await client.get(f"/api/v3/auth/qr/{token}")
+        resp = await client.get(f"/api/v4/auth/qr/{token}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "success"
@@ -255,7 +207,7 @@ class TestQRStatus:
             patch("telegram_scraper.api.auth.QR_TOKEN_REFRESH_SECONDS", 0.2),
         ):
             start = await client.post(
-                "/api/v3/auth/qr", json={"username": "refreshuser"}
+                "/api/v4/auth/qr", json={}
             )
             token = start.json()["token"]
             original_url = start.json()["qr_url"]
@@ -263,7 +215,7 @@ class TestQRStatus:
             # Wait long enough for at least one recreate cycle
             await asyncio.sleep(0.5)
 
-            resp = await client.get(f"/api/v3/auth/qr/{token}")
+            resp = await client.get(f"/api/v4/auth/qr/{token}")
             data = resp.json()
             assert data["status"] == "pending"
             assert data["qr_url"] != original_url  # URL was refreshed
@@ -273,7 +225,7 @@ class TestQRStatus:
             await asyncio.sleep(0.1)
 
     async def test_not_found(self, client):
-        resp = await client.get("/api/v3/auth/qr/nonexistent")
+        resp = await client.get("/api/v4/auth/qr/nonexistent")
         assert resp.status_code == 404
 
     async def test_success_auto_cleans_up(self, client):
@@ -284,23 +236,23 @@ class TestQRStatus:
         with patch(
             "telegram_scraper.api.auth.TelegramClient", return_value=mock_client
         ):
-            start = await client.post("/api/v3/auth/qr", json={"username": "cleanuser"})
+            start = await client.post("/api/v4/auth/qr", json={})
         token = start.json()["token"]
 
         fake_qr.resolve()
         await asyncio.sleep(0.2)
 
         # First poll — success
-        resp1 = await client.get(f"/api/v3/auth/qr/{token}")
+        resp1 = await client.get(f"/api/v4/auth/qr/{token}")
         assert resp1.json()["status"] == "success"
 
         # Second poll — gone
-        resp2 = await client.get(f"/api/v3/auth/qr/{token}")
+        resp2 = await client.get(f"/api/v4/auth/qr/{token}")
         assert resp2.status_code == 404
 
 
 class TestTwoFactor:
-    """POST /api/v3/auth/qr/{token}/2fa"""
+    """POST /api/v4/auth/qr/{token}/2fa"""
 
     async def test_2fa_flow(self, client):
         from telethon.errors import SessionPasswordNeededError
@@ -311,7 +263,7 @@ class TestTwoFactor:
         with patch(
             "telegram_scraper.api.auth.TelegramClient", return_value=mock_client
         ):
-            start = await client.post("/api/v3/auth/qr", json={"username": "tfauser"})
+            start = await client.post("/api/v4/auth/qr", json={})
         token = start.json()["token"]
 
         # Simulate scan that triggers 2FA
@@ -319,12 +271,12 @@ class TestTwoFactor:
         await asyncio.sleep(0.2)
 
         # Status should be password_required
-        status = await client.get(f"/api/v3/auth/qr/{token}")
+        status = await client.get(f"/api/v4/auth/qr/{token}")
         assert status.json()["status"] == "password_required"
 
         # Submit password
         resp = await client.post(
-            f"/api/v3/auth/qr/{token}/2fa", json={"password": "my2fapassword"}
+            f"/api/v4/auth/qr/{token}/2fa", json={"password": "my2fapassword"}
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "success"
@@ -337,13 +289,13 @@ class TestTwoFactor:
             "telegram_scraper.api.auth.TelegramClient", return_value=mock_client
         ):
             start = await client.post(
-                "/api/v3/auth/qr", json={"username": "wrongstate"}
+                "/api/v4/auth/qr", json={}
             )
         token = start.json()["token"]
 
         # Try submitting 2FA while still pending
         resp = await client.post(
-            f"/api/v3/auth/qr/{token}/2fa", json={"password": "nope"}
+            f"/api/v4/auth/qr/{token}/2fa", json={"password": "nope"}
         )
         assert resp.status_code == 409
 
@@ -352,7 +304,7 @@ class TestTwoFactor:
 
 
 class TestCancelQR:
-    """DELETE /api/v3/auth/qr/{token}"""
+    """DELETE /api/v4/auth/qr/{token}"""
 
     async def test_cancel_pending(self, client):
         fake_qr = FakeQRLogin()
@@ -361,16 +313,16 @@ class TestCancelQR:
         with patch(
             "telegram_scraper.api.auth.TelegramClient", return_value=mock_client
         ):
-            start = await client.post("/api/v3/auth/qr", json={"username": "cancelme"})
+            start = await client.post("/api/v4/auth/qr", json={})
         token = start.json()["token"]
 
-        resp = await client.delete(f"/api/v3/auth/qr/{token}")
+        resp = await client.delete(f"/api/v4/auth/qr/{token}")
         assert resp.status_code == 200
 
         # Token should now be gone
-        resp2 = await client.get(f"/api/v3/auth/qr/{token}")
+        resp2 = await client.get(f"/api/v4/auth/qr/{token}")
         assert resp2.status_code == 404
 
     async def test_cancel_nonexistent(self, client):
-        resp = await client.delete("/api/v3/auth/qr/doesnotexist")
+        resp = await client.delete("/api/v4/auth/qr/doesnotexist")
         assert resp.status_code == 404

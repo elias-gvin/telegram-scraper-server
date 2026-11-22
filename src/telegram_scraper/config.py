@@ -2,26 +2,27 @@
 
 Configuration sources (no overlap):
 - api_id, api_hash  → env vars / .env only
-- data_dir          → CLI --data-dir (default ./data)
+- data_dir, account → CLI --data-dir (default ./data) / --account
 - host, port        → CLI --host / --port
+- API token         → {data_dir}/token (created on first start)
 - settings file     → CLI --settings or {data_dir}/settings.yaml
-- download_media, max_media_size_mb, telegram_batch_size, repair_media → settings.yaml
+- download_media, max_media_size_mb, telegram_batch_size, refresh_days,
+  download_file_types → settings.yaml (editable via the /settings API)
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import secrets
 import shutil
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Optional
-from dataclasses import dataclass, field
 
+import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
-import yaml
-
 
 logger = logging.getLogger(__name__)
 
@@ -54,55 +55,66 @@ class RuntimeSettings(BaseModel):
     """Runtime-tunable settings (from settings.yaml)."""
 
     download_media: bool = True
-    max_media_size_mb: Optional[float] = Field(default=20, ge=0)  # None/0 = no limit
+    max_media_size_mb: float | None = Field(default=20, ge=0)  # None/0 = no limit
     telegram_batch_size: int = Field(default=100, gt=0)
     refresh_days: int = Field(default=30, ge=0)  # sync re-reads this many recent days
-    repair_media: bool = True
     download_file_types: DownloadFileTypes = Field(default_factory=DownloadFileTypes)
 
 
 @dataclass
 class ServerConfig:
-    """Server configuration."""
+    """Server configuration. One server = one Telegram account = one data directory."""
 
     # Telegram API credentials (from env vars)
     api_id: str
     api_hash: str
 
-    # Data directory (from CLI)
+    # From CLI
     data_dir: Path = field(default_factory=lambda: Path("./data"))
-
-    # Server settings (from CLI)
+    account: str = "default"  # session name: {data_dir}/sessions/{account}.session
     host: str = "127.0.0.1"
     port: int = 8000
 
     # Runtime-tunable settings (from settings.yaml)
     settings: RuntimeSettings = field(default_factory=RuntimeSettings)
+    settings_path: Path | None = field(default=None, repr=False)
 
-    # Internal: path to the active settings.yaml file
-    settings_path: Optional[Path] = field(default=None, repr=False)
+    # Bearer token every API request must carry (from {data_dir}/token when None)
+    token: str | None = field(default=None, repr=False)
 
     def __post_init__(self):
-        """Convert string paths and create directories."""
-        if isinstance(self.data_dir, str):
-            self.data_dir = Path(self.data_dir)
-        if isinstance(self.settings_path, str):
+        self.data_dir = Path(self.data_dir)
+        if self.settings_path is not None:
             self.settings_path = Path(self.settings_path)
-
-        # Create directory structure
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.dialogs_dir.mkdir(parents=True, exist_ok=True)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
-
-    @property
-    def dialogs_dir(self) -> Path:
-        """Directory for per-dialog databases and media."""
-        return self.data_dir / "dialogs"
+        self.media_dir.mkdir(parents=True, exist_ok=True)
+        if self.token is None:
+            self.token = load_or_create_token(self.data_dir / "token")
 
     @property
     def sessions_dir(self) -> Path:
-        """Directory for Telegram session files."""
         return self.data_dir / "sessions"
+
+    @property
+    def session_path(self) -> Path:
+        return self.sessions_dir / self.account
+
+    @property
+    def archive_path(self) -> Path:
+        return self.data_dir / "archive.db"
+
+    @property
+    def media_dir(self) -> Path:
+        return self.data_dir / "media"
+
+
+def load_or_create_token(path: Path) -> str:
+    """Read the API token, creating a random one (readable by the owner only) on first start."""
+    if not path.exists():
+        path.write_text(secrets.token_urlsafe(32) + "\n")
+        path.chmod(0o600)
+    return path.read_text().strip()
 
 
 def load_credentials_from_env() -> dict:
@@ -138,11 +150,6 @@ def load_settings(settings_path: Path) -> RuntimeSettings:
     """Load runtime-tunable settings from a YAML file."""
     with open(settings_path, "r") as f:
         data = yaml.safe_load(f) or {}
-    # # Drop invalid download_file_types so we get model default
-    # if "download_file_types" in data and not isinstance(
-    #     data.get("download_file_types"), dict
-    # ):
-    #     del data["download_file_types"]
     return RuntimeSettings.model_validate(data)
 
 
@@ -150,22 +157,24 @@ def save_settings(config: ServerConfig) -> None:
     """
     Persist runtime-tunable settings to settings.yaml.
 
-    Writes only the 3 tunable params — no secrets, no infrastructure.
+    Writes only the tunable settings — no secrets, no infrastructure.
     """
     if not config.settings_path:
         logger.warning("No settings_path set — cannot persist settings")
         return
 
-    with open(config.settings_path, "w") as f:
+    partial = config.settings_path.with_suffix(".yaml.part")
+    with open(partial, "w") as f:
         f.write("# Telegram Scraper — Runtime Settings\n")
         f.write("# These values can be changed via the /settings API endpoint.\n\n")
         yaml.dump(
             config.settings.model_dump(), f, default_flow_style=False, sort_keys=False
         )
+    os.replace(partial, config.settings_path)
 
 
 def resolve_settings_file(
-    data_dir: Path, cli_settings_path: Optional[Path] = None
+    data_dir: Path, cli_settings_path: Path | None = None
 ) -> Path:
     """
     Determine which settings.yaml to use and return the canonical path
