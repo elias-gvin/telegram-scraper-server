@@ -101,10 +101,12 @@ session of a different account, because private-chat message ids are per account
 ## After upgrading Telethon
 
 A newer Telethon speaks a newer Telegram protocol layer and may receive more for
-the same message (rich posts, for example, were empty before 1.46). Each chat
-remembers the oldest layer its archived messages were read with. Sync reports a
-`stale_layer` problem until you run `POST /sync/{id}?full=true`, which re-reads
-every message (no media is re-downloaded).
+the same message (rich posts, for example, were empty before 1.46). Each archived
+message remembers the layer it was last read with, and sync reports the oldest
+one in the chat (deleted messages excluded, since they cannot be read again).
+A normal sync updates the messages it re-reads (new ones and the refresh window);
+older ones keep a `stale_layer` problem until you run `POST /sync/{id}?full=true`,
+which re-reads every message (no media is re-downloaded).
 
 ## Re-downloading media files
 

@@ -34,7 +34,7 @@ from . import media as media_files
 from .archive import Archive, dump_raw
 from .config import RuntimeSettings
 from .serialize import SERIALIZER_ERROR, check, iso
-from .telegram import peer_fields, resolve, title_of
+from .telegram import DialogNotFound, peer_fields, resolve, title_of
 
 logger = logging.getLogger(__name__)
 
@@ -119,28 +119,35 @@ async def sync_dialog(
             await _download_media(ctx, entity, settings, media_dir)
         if reached_start:
             await _check_count(ctx, entity)
-        # Every archived message was read by THIS client if the dialog was empty before
-        # or a full refresh just re-read it; otherwise older reads remain.
-        read_everything = state["high_id"] is None or (refresh and full)
-        archive.finish_sync(
-            did,
-            reached_start,
-            int(datetime.now(UTC).timestamp()),
-            LAYER if read_everything else None,
-        )
+        archive.finish_sync(did, reached_start, int(datetime.now(UTC).timestamp()))
 
         final = archive.dialog(did)
         report.reached_start = bool(final["reached_start"])
         if final["low_id"] is not None:
             report.covered_from = iso(archive.message_date(did, final["low_id"]))
-        report.layer = final["layer"]
-        report.problems = archive.problems(did) + _stale_layer(final)
+        report.layer = archive.oldest_layer(did)
+        report.problems = archive.problems(did)
+        if archive.message_count(did) and (report.layer or 0) < LAYER:
+            report.problems.append(_stale_layer(did, report.layer))
 
     if migrated_from is not None:
+        # This dialog is already synced and saved: a missing old group is a problem of
+        # the report, not a failure of the whole call.
+        try:
+            old_entity = await resolve(client, migrated_from)
+        except DialogNotFound as e:
+            report.problems.append(
+                {
+                    "dialog_id": did,
+                    "message_id": 0,
+                    "problem": f"migrated_from_unavailable: {e}",
+                }
+            )
+            return report
         old = await sync_dialog(
             client,
             archive,
-            await resolve(client, migrated_from),
+            old_entity,
             settings,
             media_dir,
             since=since,
@@ -196,7 +203,12 @@ async def _save(ctx: _Context, messages) -> list[int]:
         for msg in messages:
             raw = _raw_json(msg)
             ctx.archive.save_message(
-                ctx.dialog_id, msg.id, int(msg.date.timestamp()), msg.sender_id, raw
+                ctx.dialog_id,
+                msg.id,
+                int(msg.date.timestamp()),
+                msg.sender_id,
+                raw,
+                LAYER,
             )
             data = json.loads(raw)
             problem = check(data)
@@ -255,23 +267,28 @@ async def _refresh(
     settings: RuntimeSettings,
     full: bool,
 ):
-    """Re-read already archived messages; anything Telegram no longer returns is marked deleted."""
-    if not full and settings.refresh_days == 0:
+    """Re-read already archived messages; anything Telegram no longer returns is marked deleted.
+
+    The window is an id range, [first, high_id]. Only `first` comes from a date: the
+    lowest archived id dated within the last `refresh_days`. Reading and the deletion
+    check then use ids only, because ids are ordered within a chat and dates are not
+    guaranteed to be (a message with a high id may carry an old date).
+    """
+    if full:
+        first = low_id
+    elif settings.refresh_days == 0:
         return
-    # Whole seconds: Telegram dates and archived dates are whole seconds too, so the
-    # window read from Telegram and the window checked for deletions are identical.
-    since = None
-    if not full:
+    else:
+        # Whole seconds, like Telegram dates: a message dated exactly on the cutoff is in.
         now = datetime.now(UTC).replace(microsecond=0)
-        since = now - timedelta(days=settings.refresh_days)
+        since = int((now - timedelta(days=settings.refresh_days)).timestamp())
+        first = ctx.archive.first_id_since(ctx.dialog_id, low_id, high_id, since)
+        if first is None:
+            return  # nothing archived is recent enough
     seen, _ = await _fetch(
-        ctx,
-        ctx.client.iter_messages(entity, max_id=high_id + 1, min_id=low_id - 1),
-        since,
+        ctx, ctx.client.iter_messages(entity, max_id=high_id + 1, min_id=first - 1)
     )
-    gone = ctx.archive.live_ids(
-        ctx.dialog_id, low_id, high_id, since and int(since.timestamp())
-    ) - set(seen)
+    gone = ctx.archive.live_ids(ctx.dialog_id, first, high_id) - set(seen)
     ctx.archive.mark_deleted(ctx.dialog_id, gone)
     ctx.report.refreshed_messages = len(seen)
     ctx.report.deleted_messages = len(gone)
@@ -337,17 +354,12 @@ async def _check_count(ctx: _Context, entity):
         ctx.archive.set_problem(ctx.dialog_id, 0, problem)
 
 
-def _stale_layer(dialog) -> list[dict]:
-    """Warn when archived messages were read by an older Telegram client: newer
-    clients may receive more (e.g. rich posts). `full=true` re-reads them."""
-    if dialog["low_id"] is None or (dialog["layer"] or 0) >= LAYER:
-        return []
-    old = dialog["layer"] or "unknown"
-    return [
-        {
-            "dialog_id": dialog["dialog_id"],
-            "message_id": 0,
-            "problem": f"stale_layer: archived with Telegram layer {old}, client has {LAYER}; "
-            "run sync with full=true",
-        }
-    ]
+def _stale_layer(dialog_id: int, layer: int | None) -> dict:
+    """Archived messages were read by an older Telegram client: newer clients may
+    receive more (e.g. rich posts). `full=true` re-reads them."""
+    return {
+        "dialog_id": dialog_id,
+        "message_id": 0,
+        "problem": f"stale_layer: archived with Telegram layer {layer or 'unknown'}, "
+        f"client has {LAYER}; run sync with full=true",
+    }
