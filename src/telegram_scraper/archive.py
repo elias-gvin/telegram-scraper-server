@@ -71,6 +71,16 @@ MIGRATIONS = [
     -- (NULL = unknown: archived before this was tracked). See sync.py.
     ALTER TABLE dialogs ADD COLUMN layer INTEGER;
     """,
+    """
+    -- The layer moves to each message: the layer it was last read with (NULL = unknown).
+    -- The dialog's value was the oldest layer among its messages, so it is a safe
+    -- lower bound for every one of them.
+    ALTER TABLE messages ADD COLUMN layer INTEGER;
+    UPDATE messages SET layer = (
+        SELECT d.layer FROM dialogs d WHERE d.dialog_id = messages.dialog_id
+    );
+    ALTER TABLE dialogs DROP COLUMN layer;
+    """,
 ]
 
 
@@ -148,26 +158,32 @@ class Archive:
                 (dialog_id, title, username, migrated_from),
             )
 
-    def finish_sync(
-        self, dialog_id: int, reached_start: bool, synced_at: int, layer: int | None
-    ):
-        """`layer`: set when every archived message was (re)read in this sync; else None."""
+    def finish_sync(self, dialog_id: int, reached_start: bool, synced_at: int):
         with self.db:
             self.db.execute(
-                """UPDATE dialogs SET reached_start = max(reached_start, ?), synced_at = ?,
-                   layer = coalesce(?, layer) WHERE dialog_id = ?""",
-                (int(reached_start), synced_at, layer, dialog_id),
+                """UPDATE dialogs SET reached_start = max(reached_start, ?), synced_at = ?
+                   WHERE dialog_id = ?""",
+                (int(reached_start), synced_at, dialog_id),
             )
 
     # --- writes (call inside `with archive.transaction():`) -----------------
     def save_message(
-        self, dialog_id: int, message_id: int, date: int, sender_id, raw: str
+        self,
+        dialog_id: int,
+        message_id: int,
+        date: int,
+        sender_id,
+        raw: str,
+        layer: int,
     ):
+        """`layer`: the Telegram API layer of the client that read the message."""
         self.db.execute(
-            """INSERT INTO messages (dialog_id, message_id, date, sender_id, raw) VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO messages (dialog_id, message_id, date, sender_id, raw, layer)
+               VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT (dialog_id, message_id) DO UPDATE SET
-                 date = excluded.date, sender_id = excluded.sender_id, raw = excluded.raw, deleted = 0""",
-            (dialog_id, message_id, date, sender_id, raw),
+                 date = excluded.date, sender_id = excluded.sender_id, raw = excluded.raw,
+                 layer = excluded.layer, deleted = 0""",
+            (dialog_id, message_id, date, sender_id, raw, layer),
         )
 
     def extend_coverage(self, dialog_id: int, low_id: int, high_id: int):
@@ -238,16 +254,24 @@ class Archive:
             )
 
     # --- reads ---------------------------------------------------------------
-    def live_ids(
-        self, dialog_id: int, low_id: int, high_id: int, since: int | None
-    ) -> set[int]:
-        """Ids of not-deleted messages in [low_id, high_id] with date >= since."""
+    def live_ids(self, dialog_id: int, low_id: int, high_id: int) -> set[int]:
+        """Ids of not-deleted messages in [low_id, high_id]."""
         rows = self.db.execute(
             """SELECT message_id FROM messages WHERE dialog_id = ? AND deleted = 0
-               AND message_id BETWEEN ? AND ? AND date >= ?""",
-            (dialog_id, low_id, high_id, since or 0),
+               AND message_id BETWEEN ? AND ?""",
+            (dialog_id, low_id, high_id),
         )
         return {r[0] for r in rows}
+
+    def first_id_since(
+        self, dialog_id: int, low_id: int, high_id: int, since: int
+    ) -> int | None:
+        """Lowest id in [low_id, high_id] of a message dated `since` or later."""
+        return self.db.execute(
+            """SELECT min(message_id) FROM messages WHERE dialog_id = ?
+               AND message_id BETWEEN ? AND ? AND date >= ?""",
+            (dialog_id, low_id, high_id, since),
+        ).fetchone()[0]
 
     def message_date(self, dialog_id: int, message_id: int) -> int | None:
         row = self.db.execute(
@@ -269,6 +293,16 @@ class Archive:
             "SELECT count(*) FROM messages WHERE dialog_id = ? AND deleted = 0",
             (dialog_id,),
         ).fetchone()[0]
+
+    def oldest_layer(self, dialog_id: int) -> int | None:
+        """Oldest layer among the dialog's messages that still exist (deleted ones can
+        never be re-read). None if any of them has an unknown layer, or there are none."""
+        row = self.db.execute(
+            """SELECT count(*) AS n, count(layer) AS known, min(layer) AS oldest
+               FROM messages WHERE dialog_id = ? AND deleted = 0""",
+            (dialog_id,),
+        ).fetchone()
+        return row["oldest"] if row["n"] and row["known"] == row["n"] else None
 
     def media_rows(self, dialog_id: int) -> list[sqlite3.Row]:
         return self.db.execute(

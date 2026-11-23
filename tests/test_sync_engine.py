@@ -289,29 +289,30 @@ async def test_media_step_can_be_skipped(env):
     assert archive.media(CHAT_ID, 1)["status"] == "downloaded"
 
 
+def stale(report):
+    return [
+        p["problem"] for p in report.problems if p["problem"].startswith("stale_layer")
+    ]
+
+
 async def test_layer_marker_warns_until_a_full_refresh(env):
-    """The archive remembers the oldest Telegram layer its messages were read with."""
+    """Each message remembers the Telegram layer it was read with; the report shows the oldest."""
     from telethon.tl.alltlobjects import LAYER
 
     fake, archive, _, sync, _ = env
-    fake.add(CHANNEL, *messages(range(1, 6)))
-
-    def stale(report):
-        return [
-            p["problem"]
-            for p in report.problems
-            if p["problem"].startswith("stale_layer")
-        ]
+    old = [  # outside the refresh window, so a normal sync does not re-read them
+        text_msg(CHANNEL, i, f"m{i}", date=NOW - timedelta(days=100 - i))
+        for i in range(1, 6)
+    ]
+    fake.add(CHANNEL, *old)
 
     first = await sync()
     assert first.layer == LAYER and stale(first) == []
 
-    with archive.transaction():  # pretend it was archived by an older client
-        archive.db.execute("UPDATE dialogs SET layer = 200")
+    with archive.transaction():  # pretend they were archived by an older client
+        archive.db.execute("UPDATE messages SET layer = 200")
     fake.add(CHANNEL, text_msg(CHANNEL, 6, "new", date=NOW))
-    later = (
-        await sync()
-    )  # new messages arrive with the current layer, old ones stay old
+    later = await sync()  # the new message gets the current layer, old ones stay old
     assert later.new_messages == 1 and later.layer == 200
     assert stale(later) == [
         f"stale_layer: archived with Telegram layer 200, client has {LAYER}; run sync with full=true"
@@ -321,12 +322,108 @@ async def test_layer_marker_warns_until_a_full_refresh(env):
     assert refreshed.layer == LAYER and stale(refreshed) == []
 
 
-async def test_archives_from_before_layer_tracking_are_unknown(env):
+async def test_refresh_window_updates_the_layer_of_what_it_reads(env):
+    """Recent messages re-read by a normal sync are no longer stale."""
+    from telethon.tl.alltlobjects import LAYER
+
     fake, archive, _, sync, _ = env
-    fake.add(CHANNEL, *messages(range(1, 3)))
+    fake.add(CHANNEL, *messages(range(1, 6)))  # all within the refresh window
     await sync()
     with archive.transaction():
-        archive.db.execute("UPDATE dialogs SET layer = NULL")
+        archive.db.execute("UPDATE messages SET layer = 200")
+    report = await sync()
+    assert report.layer == LAYER and stale(report) == []
+
+
+async def test_interrupted_first_sync_still_gets_a_layer(env):
+    from telethon.tl.alltlobjects import LAYER
+
+    fake, _, _, sync, _ = env
+    fake.add(CHANNEL, *messages(range(1, 51)))
+    fake.fail_after = 25
+    with pytest.raises(ConnectionError):
+        await sync()
+    fake.fail_after = None
+    report = await sync()
+    assert report.layer == LAYER and stale(report) == []
+
+
+async def test_deleted_messages_do_not_keep_a_chat_stale(env):
+    """A deleted message can never be re-read, so its old layer does not count."""
+    from telethon.tl.alltlobjects import LAYER
+
+    fake, archive, _, sync, _ = env
+    fake.add(CHANNEL, *messages(range(1, 4)))
+    await sync()
+    with archive.transaction():
+        archive.db.execute("UPDATE messages SET layer = 200 WHERE message_id = 2")
+    fake.delete(CHANNEL, 2)
+    report = await sync()
+    assert report.deleted_messages == 1
+    assert report.layer == LAYER and stale(report) == []
+
+
+async def test_archives_from_before_layer_tracking_are_unknown(env):
+    fake, archive, _, sync, _ = env
+    fake.add(
+        CHANNEL,
+        *[text_msg(CHANNEL, i, date=NOW - timedelta(days=100 - i)) for i in (1, 2)],
+    )
+    await sync()
+    with archive.transaction():
+        archive.db.execute("UPDATE messages SET layer = NULL")
     report = await sync()
     assert report.layer is None
     assert any("layer unknown" in p["problem"] for p in report.problems)
+
+
+def test_schema_upgrade_moves_the_dialog_layer_onto_its_messages(tmp_path):
+    """Archives from schema 3 kept one layer per dialog; it becomes each message's layer."""
+    import sqlite3
+
+    from telegram_scraper.archive import MIGRATIONS
+
+    path = tmp_path / "old.db"
+    db = sqlite3.connect(path)
+    for number, script in enumerate(MIGRATIONS[:3], start=1):
+        db.executescript(f"BEGIN; {script}; PRAGMA user_version = {number}; COMMIT;")
+    db.executescript(
+        """INSERT INTO dialogs (dialog_id, low_id, high_id, layer) VALUES (1, 1, 2, 214), (2, 1, 1, NULL);
+           INSERT INTO messages (dialog_id, message_id, date, raw) VALUES (1, 1, 0, '{}'), (1, 2, 0, '{}'), (2, 1, 0, '{}');"""
+    )
+    db.close()
+    archive = Archive(path)
+    assert archive.oldest_layer(1) == 214
+    assert archive.oldest_layer(2) is None
+    assert "layer" not in dict(archive.dialog(1))
+
+
+async def test_out_of_order_dates_do_not_invent_deletions(env):
+    """Ids are ordered within a chat, dates are not guaranteed to be: a message with a
+    high id and an old date must not cut the refresh short."""
+    fake, _, _, sync, history = env
+    fake.add(
+        CHANNEL,
+        text_msg(CHANNEL, 1, "recent", date=NOW - timedelta(hours=2)),
+        text_msg(CHANNEL, 2, "old date, higher id", date=NOW - timedelta(days=60)),
+        text_msg(CHANNEL, 3, "newest", date=NOW - timedelta(hours=1)),
+    )
+    await sync()
+    fake.edit(CHANNEL, 1, message="edited")
+    report = await sync()
+    assert report.deleted_messages == 0
+    assert not any(m.get("deleted") for m in history())
+    assert history()[0]["message"] == "edited"  # read, not skipped
+    assert not [p for p in report.problems if p["problem"].startswith("count_mismatch")]
+
+
+async def test_unreachable_old_group_is_a_problem_not_a_failure(env):
+    fake, _, _, sync, history = env
+    fake.add(SUPERGROUP, *messages(range(1, 4), chat=SUPERGROUP))
+    fake.migrated_from[-1000000007000] = -9999  # not resolvable
+    report = await sync(SUPERGROUP)
+    assert ids(history(-1000000007000)) == [1, 2, 3]
+    assert report.migrated_from == -9999
+    assert [p["problem"].split(":")[0] for p in report.problems] == [
+        "migrated_from_unavailable"
+    ]
