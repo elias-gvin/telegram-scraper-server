@@ -67,6 +67,26 @@ All dialog ids are **marked ids**, exactly as `/search/dialogs` returns them:
 channels and supergroups are `-100…`, basic groups are `-…`, and users are
 positive. Bare ids are not accepted (`404`).
 
+## Edge case: upgraded groups (one group, two dialog ids)
+
+*Edge case. It only affects groups that started as a basic group and were
+upgraded later; most chats never see it.*
+
+When Telegram upgrades a basic group to a supergroup, it creates a **new chat
+with a new id**. Messages from before the upgrade stay in the **old basic
+group** under its old id; the supergroup's history never contains them.
+
+- Syncing the supergroup also archives the old group, under its own id. They are
+  **not merged**.
+- The sync report (`POST /sync`, and the `sync` object in the history `done`
+  event) has `migrated_from`: the old group's id. `/search/dialogs` shows the old
+  group with `migrated_to`.
+- **When `migrated_from` is set, the full history is two reads:**
+  `/history/{migrated_from}` (older part), then `/history/{supergroup id}`
+  (newer part). Never present only the supergroup's part as the whole history.
+- `migrated_from_unavailable: …` in `problems`: the old group could not be
+  reached, so its part is missing. Tell the user.
+
 ## Reading history: `GET /history/{dialog_id}` (Server-Sent Events, use `curl -N`)
 
 The server first syncs **only the missing part** of the requested range from
@@ -144,10 +164,8 @@ The response contains counts plus:
   `[{dialog_id, message_id, problem}]`. `message_id: 0` means the dialog as a
   whole; `count_mismatch` means Telegram reports more messages than the archive
   holds. **Always report problems to the user.**
-- `migrated_from`: the group was upgraded from a basic group. Its older history
-  is archived under that id; read it with `/history/{migrated_from}`.
-  If that old group cannot be reached, the sync still succeeds and `problems`
-  contains `migrated_from_unavailable: …`.
+- `migrated_from`: the old basic group this supergroup was upgraded from; its
+  history from before the upgrade is there. See "Edge case: upgraded groups" above.
 - `reached_start`, `covered_from`: how far back the archive goes.
 - `layer`: the oldest Telegram protocol layer the chat's archived (not deleted)
   messages were read with (`null` = unknown). If it is older than the server's Telethon, `problems`

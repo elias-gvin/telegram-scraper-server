@@ -98,6 +98,39 @@ data/
 One data directory belongs to one Telegram account. The archive refuses a
 session of a different account, because private-chat message ids are per account.
 
+## Edge case: upgraded groups (`migrated_from`)
+
+*Edge case. It only affects groups that started as a basic group and were
+upgraded later; most chats never see it.*
+
+When Telegram upgrades a **basic group** to a **supergroup** (more than 200
+members, made public, or a supergroup-only setting turned on), it does not
+convert the chat. It creates a **new chat with a new id** and new message ids
+starting from 1. All messages from before the upgrade stay in the **old basic
+group**, which still exists. Asking Telegram for the supergroup's history never
+returns them.
+
+So one group you see in Telegram can be **two chats in the archive**:
+
+| Chat | Example id | Holds |
+|---|---|---|
+| old basic group | `-123456789` | messages before the upgrade |
+| new supergroup | `-1001987654321` | messages since the upgrade |
+
+What the archive does:
+
+- Syncing the supergroup (`POST /sync` or `GET /history`) also syncs the old
+  group, under its own id. The two are **not merged**: their message ids are
+  numbered separately.
+- The sync report shows the link: `"migrated_from": -123456789`. In
+  `/search/dialogs` the old group shows `migrated_to` with the supergroup's id.
+- To read the whole group, read both: `/history/-123456789` (older part), then
+  `/history/-1001987654321` (newer part). The old group ends with a
+  `chat_migrate_to` service message, the supergroup starts with
+  `channel_migrate_from`.
+- If the old group cannot be reached, the supergroup still syncs normally and
+  `problems` lists `migrated_from_unavailable: …`.
+
 ## After upgrading Telethon
 
 A newer Telethon speaks a newer Telegram protocol layer and may receive more for
